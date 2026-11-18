@@ -103,6 +103,18 @@ node scripts\unpack-apk-mod.js "C:\path\to\mod.apk"
 
 PC판 기본 모드 슬롯(20캐릭터)으로 가져오려면 `node scripts\import-apk.js "<mod.apk>"` 를 사용하세요 (`%APPDATA%\Incredibox\incredimods\`에 등록).
 
+## Scratch(Sprunki) 작품 → Incredibox 모드
+
+Cocrea/Scratch의 Sprunki 계열 작품(`.sb3`)을 PC판 Incredibox 모드로 변환합니다. 캐릭터 애니메이션은 원작 스크립트를 시뮬레이션해서 재현하고, 사운드는 원작처럼 겹쳐 재생되는 소리를 그대로 섞어 정확한 길이의 A/B 루프로 만듭니다. 원작과 같은 구도로 그리고, 결과는 **IMPORTED** 목록에 등록됩니다.
+
+```powershell
+cd scripts\sb3-to-incredimod
+node prepare.js "<작품.sb3>" --work "<저장소 밖 작업 폴더>"
+node build-art.js --work "<작업 폴더>"; node build-audio.js --work "<작업 폴더>"; node build-pack.js --work "<작업 폴더>" --install
+```
+
+> 리믹스를 허용한 작품만 변환하고, 원작자 크레딧을 남기세요. 원작 파일과 변환 결과물은 저장소에 올리지 마세요. 자세한 내용: [scripts/sb3-to-incredimod/README.md](scripts/sb3-to-incredimod/README.md)
+
 ## 동작 원리
 
 ```
@@ -124,6 +136,7 @@ modloader/main.js ── Mods/·ApkMods/ 스캔, 로그, DevTools 단축키, Ste
 launcher/         Steam 실행 파일 자리에 들어가는 런처 (C#, 셋업 때 .NET Framework csc로 빌드)
 modloader/        메인 프로세스 부트스트랩(main.js), 렌더러 API·오버레이(renderer.js)
 scripts/          setup-game.ps1, extract-asar.js, unpack-apk-mod.js, import-apk.js, lib/common.js
+scripts/sb3-to-incredimod/   Scratch(.sb3) → Incredibox 모드 변환기
 mods-example/     샘플 모드
 ```
 
