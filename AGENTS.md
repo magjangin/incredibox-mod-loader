@@ -74,6 +74,7 @@
 - **Logging:** first log write per launch renames `Mods/modloader.log` → `Mods/modloader.prev.log` (keeps exactly one previous session).
 - **`unpack-apk-mod.js` side effect:** rewrites `this.recmaxloop = N` → `999` in every `asset-v*/app.js` (recording limit) and blanks `cordova.js`.
 - **Line endings:** files are LF in the working tree; git (autocrlf) warns about CRLF — harmless. Compare deployed vs repo with `diff --strip-trailing-cr`.
+- **APK screen scale vs pointer math (2026-11-19):** APK mode scales `body` with `transform: scale(apkScale)` (origin center), but APK engines compute positions from layout values (`offsetLeft`, `screenW`). Replay seek (`moveControlHead` in `main.min.js`) was off by `(1-scale)/2`: at 90% the leftmost click jumped to 5% (1:19 of a 26:14 mix) and the end was unreachable. `renderer.js` `patchReplaySeek()` replaces the global `window.moveControlHead` with a `getBoundingClientRect()`-based version (falls back to the original on error). Verified offline against the engine's own function (vm, scales 0.7/0.9/1). **Verified in game by the user (2026-11-19):** a 26:14 Armed replay now seeks to 0:00 from the left edge. Picto drag (`bouger(pageX, pageY)`) may have the same offset; it was not reported, so it is untouched.
 - **Quick redeploy of loader only:** copy `modloader\*.js` into `Modded\resources\app\modloader\` (game must be restarted). Full `setup-game.ps1` wipes and re-extracts `resources\app`.
 
 ## 3.2 Verification Status (2026-11-18)
