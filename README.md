@@ -18,11 +18,22 @@
 
 ## 요구 사항
 
-- Windows + **Incredibox (Steam, v1.2.9에서 확인)**
-- [Node.js](https://nodejs.org/) 18 이상
-- [Bandizip](https://www.bandisoft.com/bandizip/) (`bz.exe` — 게임 실행 파일 안의 7z/NSIS 압축을 푸는 데 사용)
+- Windows 11 + **Incredibox (Steam, v1.2.9에서 확인)**
+- 설치기 exe만 쓰면 다른 프로그램은 필요 없습니다.
+  - Windows 10은 기본 `tar.exe`가 7z를 못 풀 수 있으니 [7-Zip](https://7-zip.org) 또는 [Bandizip](https://www.bandisoft.com/bandizip/)을 설치해 두세요 (설치기가 자동으로 찾아 씁니다).
+- 스크립트로 설치하거나 APK 도구를 쓸 때: [Node.js](https://nodejs.org/) 18 이상 + [Bandizip](https://www.bandisoft.com/bandizip/) (`bz.exe`)
 
-## 설치
+## 설치 (설치기 exe — 권장)
+
+1. `IncrediboxModLoader-Setup.exe`를 받아서 실행합니다. (직접 빌드: `powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1` → `build\IncrediboxModLoader-Setup.exe`)
+2. 게임 폴더가 자동으로 잡히는지 확인합니다. 못 찾으면 **찾아보기...**로 `Incredibox_steam.exe`가 있는 폴더를 고릅니다.
+3. **설치 / 업데이트**를 누릅니다 (약 10초). 끝나면 Steam에서 ▶ 플레이하면 됩니다.
+
+- **제거 (원본 복원)**: Steam 실행 파일을 원본으로 되돌립니다. `Modded\`(모드·APK 저장 데이터)는 남깁니다.
+- Steam이 게임을 업데이트하거나 무결성 검사를 하면 런처가 원본으로 덮어써지니, 설치기를 다시 실행하세요.
+- 명령줄: `IncrediboxModLoader-Setup.exe --install [--game-dir <폴더>] [--target <폴더>] [--no-launcher]`, `--uninstall`, `--status`
+
+## 설치 (스크립트 — 개발용)
 
 ```powershell
 git clone https://github.com/magjangin/incredibox-mod-loader.git

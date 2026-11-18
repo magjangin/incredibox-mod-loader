@@ -21,6 +21,7 @@
 - `scripts/import-apk.js` — Converts Android Incredibox mod APKs (`assets/www/asset-v*`) into PC `incredimods/<versionId>.json` + `localmods.json` entries under `%APPDATA%\Incredibox\incredimods\`.
 - `scripts/unpack-apk-mod.js` — Extracts full `assets/www/` from Android mod APKs into `Modded\ApkMods\<ModName>\` for 100-character / custom-engine playback via the ModLoader `F10` overlay.
 - `scripts/sb3-to-incredimod/` — Converts a Sprunki-style Scratch `.sb3` into a PC incredimod: Scratch timeline interpreter, headless-Edge SVG rendering, ffmpeg A/B loops, and the pack installer.
+- `installer/IncrediboxModLoaderInstaller.cs` + `scripts/build-installer.ps1` — Single-exe GUI/CLI installer (no Node/Bandizip needed on Windows 11), see §3.0.0.
 - `launcher/IncrediboxLauncher.cs` — Steam `Incredibox_steam.exe` replacement that starts `Modded\Incredibox.exe`.
 - `mods-example/hello-mod/` — Sample mod manifest (`mod.json`) and `renderer.js`.
 
@@ -31,6 +32,15 @@
 - **Steam appid:** 1545450 (`appmanifest_1545450.acf`, buildid 21134016, `AutoUpdateBehavior 0` = auto-update ON → an update restores the original exe; re-run setup). `-Uninstall` restores the original; `-NoLauncher` skips step 6. Launcher only supports `TargetDir = <GameDir>\Modded`.
 - **Verified 2026-11-18:** `steam://rungameid/1545450` → `Incredibox_steam.exe` (launcher, parent steam.exe) → `Modded\Incredibox.exe`, loader injected; closing the game window ends the launcher. `--remote-debugging-port=9333` passed through the launcher reaches Electron.
 - **Verified by the user:** pressing ▶ on the *Imported* "Armed" cover (PC incredimod v=9533019) fires `will-navigate` to `src/app.html?v=9533019`, which opens the Armed APK window. `script.min.js` is obfuscated with an obfuscator.io string array (`a4`/`a5`, offset 0x122). To read it, decode the array in a `vm` context; there are no plain `app.html` literals.
+
+## 3.0.0 Single-exe Installer (MelonLoader-style, 2026-11-19)
+- **Files:** `installer/IncrediboxModLoaderInstaller.cs` (WinForms + CLI), `scripts/build-installer.ps1` → `build/IncrediboxModLoader-Setup.exe` (~72 KB, `build/` is gitignored). Built with the Windows .NET Framework 4 `csc.exe` (C# 5). Payload = manifest resources `payload/modloader/*`, `payload/mods/hello-mod/*`, `payload/launcher/IncrediboxLauncher.cs` and a prebuilt launcher `payload/launcher/Incredibox_steam.exe`. Assembly version comes from `LOADER_VERSION` in `modloader/main.js`.
+- **Why no Node/Bandizip:** electron-builder stores `$PLUGINSDIR\app-64.7z` **uncompressed** in the NSIS data, so the installer carves it from the Steam exe. It finds the 7z signature `37 7A BC AF 27 1C`, checks the start-header CRC32 and the end bound, and uses `32 + NextHeaderOffset + NextHeaderSize` as the length (v1.2.9: offset 58165, 204,447,926 bytes). Windows 11 `System32\tar.exe` (bsdtar 3.8.9 with liblzma) extracts it. The resulting `app.asar` was byte-identical to the Bandizip-extracted one. Fallbacks, in order: `7-Zip\7z.exe`, then `$env:BANDIZIP` / `Bandizip\bz.exe` (Windows 10's tar 3.5.2 has no liblzma). The temp archive goes in `<target>\.installer-tmp` (same drive) and is deleted afterwards.
+- **ASAR:** ported to C# with `JavaScriptSerializer` (`System.Web.Extensions`). File names are checked (no `..`, separators or invalid chars, and the path must stay under the destination). `unpacked` entries are copied from `app.asar.unpacked` (v1.2.9 has none) and `link` entries are skipped. `package.json` gets a regex replace of `"main"` only (original formatting, UTF-8 without BOM). `setup-game.ps1` re-serializes the file with a BOM instead; the parsed content is identical.
+- **Launcher:** compiled at install time with CodeDom (`CSharpCodeProvider`) and `/win32icon:<Modded>\resources\app\src\favicon.ico`, so the game icon is never redistributed. If that fails, the embedded prebuilt (default icon) is used. Same replace/backup and launcher-detection rules as `setup-game.ps1` (§3.0).
+- **Re-install keeps** `Mods/`, `ApkMods/`, `Recordings/` and an edited `Mods/hello-mod` (the sample is only written when the folder is missing). Only `resources/app` is wiped.
+- **Verified offline (2026-11-19):** fake game dir `H:\source\incredibox-work\installer-test` with a **hardlink** to `Incredibox_steam.original.exe` (no 200 MB copy; the installer only renames, never writes into it). `--install` took about 10 s. `diff -r` against the real `Modded` showed only `package.json` (format) and user `Recordings/`. modloader matched the repo. Launcher ProductName was correct and `.original.exe` was kept. Re-install read from `.original.exe` and kept user files. `--uninstall` restored the exe, and a second uninstall was a no-op. The GUI window was captured with PrintWindow; no button was clicked. **Not verified:** the 7-Zip/Bandizip fallback, the prebuilt-launcher fallback, Windows 10, and in-game play through the installer-made runtime (identical files to the verified runtime).
+- **Not included:** APK import/unpack in the installer. The scripts still need Bandizip for the APK zip. `ELECTRON_RUN_AS_NODE=1 Modded\Incredibox.exe <script>` could replace Node (the RunAsNode fuse is on), but that is untested.
 
 ## 3.0.1 APK Mod Storage Isolation (2026-11-18 save-loss incident)
 - **Incident:** a mix the user saved in the Armed APK engine (`mix-<20-hex>-v1`) vanished. Cause: APK engines were loaded in the PC window on the same `file://` origin, so they shared localStorage with the PC game. The PC `script.min.js` runs `deleteOldLocalMixes()` at startup, which deletes every `mix-`/`fav-` entry whose `link` contains both digits and letters, so it deleted the APK mix (22:12:55, same batch as PC `timer-restore`). The APK engine also overwrote the PC `user-lang` (ko → en-US).
@@ -73,6 +83,9 @@
 - **Test technique:** Electron honours `--remote-debugging-port=<port>`; `http://127.0.0.1:<port>/json/list` → page `webSocketDebuggerUrl`, then Node 22+ global `WebSocket` sends `Runtime.evaluate` / `Page.captureScreenshot`. No extra deps needed.
 
 ## 4. Build / Deploy Command
+Single-exe installer (for users): `powershell -ExecutionPolicy Bypass -File scripts\build-installer.ps1` → `build\IncrediboxModLoader-Setup.exe` (GUI, or `--install|--uninstall|--status [--game-dir <dir>] [--target <dir>] [--no-launcher]`).
+
+Script install (dev):
 ```powershell
 powershell -ExecutionPolicy Bypass -File "h:\source\repos\incredibox\scripts\setup-game.ps1"
 ```

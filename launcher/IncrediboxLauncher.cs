@@ -1,6 +1,6 @@
 // Incredibox ModLoader Launcher
 //
-// Installed by scripts/setup-game.ps1 as <GameDir>\Incredibox_steam.exe so that the
+// Installed by the installer exe (installer/) or scripts/setup-game.ps1 as <GameDir>\Incredibox_steam.exe so that the
 // Steam "Play" button starts the modded runtime (<GameDir>\Modded\Incredibox.exe).
 // The real Steam executable is kept as Incredibox_steam.original.exe.
 //
@@ -49,7 +49,7 @@ static class Program
         {
             MessageBox.Show(
                 "ModLoader가 설치되어 있지 않아 원본 게임으로 실행합니다.\n\n" +
-                "다시 설치하려면 scripts\\setup-game.ps1 을 실행하세요.\n(" + modded + " 없음)",
+                "다시 설치하려면 IncrediboxModLoader-Setup.exe(또는 scripts\\setup-game.ps1)를 실행하세요.\n(" + modded + " 없음)",
                 Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             target = original;
         }
@@ -57,7 +57,7 @@ static class Program
         {
             MessageBox.Show(
                 "실행할 게임 파일을 찾을 수 없습니다.\n\n" + modded + "\n" + original +
-                "\n\nSteam에서 '게임 파일 무결성 검사'로 원본을 복구한 뒤 setup-game.ps1 을 다시 실행하세요.",
+                "\n\nSteam에서 '게임 파일 무결성 검사'로 원본을 복구한 뒤 설치기(IncrediboxModLoader-Setup.exe)를 다시 실행하세요.",
                 Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
