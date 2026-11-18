@@ -41,6 +41,13 @@
 
   window.IncrediboxModLoader = api;
 
+  // Mod/APK metadata is third-party text: never interpolate it into innerHTML raw.
+  const escapeHtml = (value) =>
+    String(value == null ? '' : value).replace(
+      /[&<>"']/g,
+      (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]
+    );
+
   // Screen scale & fullscreen helpers for APK mode (100-char / 10-polo layouts)
   const SCALE_KEY = 'incredibox_modloader_apk_scale';
   let apkScale = parseFloat(localStorage.getItem(SCALE_KEY) || '0.9');
@@ -215,10 +222,10 @@
           (m) =>
             `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;margin-top:8px;border-radius:6px;background:rgba(255,255,255,0.08);">
               <div>
-                <div style="font-weight:600;">${m.name}</div>
-                <div style="font-size:11px;opacity:0.75;">${m.characters} chars • ${m.nbpolo} polos</div>
+                <div style="font-weight:600;">${escapeHtml(m.name)}</div>
+                <div style="font-size:11px;opacity:0.75;">${escapeHtml(m.characters)} chars • ${escapeHtml(m.nbpolo)} polos</div>
               </div>
-              <button data-apk-id="${m.id}" style="padding:5px 12px;border:none;border-radius:6px;background:#22c55e;color:#052e16;font-weight:700;cursor:pointer;">Play</button>
+              <button data-apk-id="${escapeHtml(m.id)}"style="padding:5px 12px;border:none;border-radius:6px;background:#22c55e;color:#052e16;font-weight:700;cursor:pointer;">Play</button>
             </div>`
         )
         .join('')
@@ -229,9 +236,9 @@
         .map(
           (m) =>
             `<div style="padding:8px;margin-top:8px;border-radius:6px;background:rgba(255,255,255,0.06);">
-              <div style="font-weight:600;">${m.name} <span style="opacity:0.7;font-weight:400;">v${m.version}</span></div>
-              <div style="font-size:11px;opacity:0.75;">by ${m.author} • ${m.status}${m.error ? `: ${m.error}` : ''}</div>
-              ${m.description ? `<div style="font-size:12px;margin-top:4px;opacity:0.9;">${m.description}</div>` : ''}
+              <div style="font-weight:600;">${escapeHtml(m.name)} <span style="opacity:0.7;font-weight:400;">v${escapeHtml(m.version)}</span></div>
+              <div style="font-size:11px;opacity:0.75;">by ${escapeHtml(m.author)} • ${escapeHtml(m.status)}${m.error ? `: ${escapeHtml(m.error)}` : ''}</div>
+              ${m.description ? `<div style="font-size:12px;margin-top:4px;opacity:0.9;">${escapeHtml(m.description)}</div>` : ''}
             </div>`
         )
         .join('')
@@ -239,7 +246,7 @@
 
   overlay.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <strong>Incredibox ModLoader v${api.version}</strong>
+      <strong>Incredibox ModLoader v${escapeHtml(api.version)}</strong>
       <span style="font-size:11px;opacity:0.7;">F10: Toggle | F12: DevTools</span>
     </div>
     ${

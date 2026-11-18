@@ -1,20 +1,56 @@
 param(
-  [string]$GameDir = "H:\steam\steamapps\common\Incredibox",
-  [string]$TargetDir = "H:\steam\steamapps\common\Incredibox\Modded"
+  # Incredibox install dir. Default: auto-detected from Steam libraries.
+  [string]$GameDir = "",
+  # Where the unpacked, modded runtime goes. Default: <GameDir>\Modded
+  [string]$TargetDir = "",
+  # Bandizip CLI. Default: $env:BANDIZIP > Program Files > PATH
+  [string]$Bandizip = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+function Find-IncrediboxDir {
+  $steamRoot = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -Name SteamPath -ErrorAction SilentlyContinue).SteamPath
+  if (-not $steamRoot) { return $null }
+  $libs = @($steamRoot)
+  $vdf = Join-Path $steamRoot "steamapps\libraryfolders.vdf"
+  if (Test-Path $vdf) {
+    foreach ($m in [regex]::Matches((Get-Content $vdf -Raw), '"path"\s+"([^"]+)"')) {
+      $libs += $m.Groups[1].Value -replace '\\\\', '\'
+    }
+  }
+  foreach ($lib in $libs) {
+    $dir = Join-Path $lib "steamapps\common\Incredibox"
+    if (Test-Path (Join-Path $dir "Incredibox_steam.exe")) { return [System.IO.Path]::GetFullPath($dir) }
+  }
+  return $null
+}
+
+function Find-Bandizip {
+  $candidates = @($env:BANDIZIP)
+  if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles "Bandizip\bz.exe" }
+  if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} "Bandizip\bz.exe" }
+  foreach ($c in $candidates) { if ($c -and (Test-Path $c)) { return $c } }
+  $cmd = Get-Command bz.exe -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  return $null
+}
+
+if (-not $GameDir) { $GameDir = Find-IncrediboxDir }
+if (-not $GameDir) { throw "Incredibox install not found via Steam. Pass -GameDir <path>." }
+if (-not $TargetDir) { $TargetDir = Join-Path $GameDir "Modded" }
+if (-not $Bandizip) { $Bandizip = Find-Bandizip }
+if (-not $Bandizip) { throw "Bandizip (bz.exe) not found. Install Bandizip or pass -Bandizip <path>." }
+
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $SteamExe = Join-Path $GameDir "Incredibox_steam.exe"
-$Bandizip = "C:\Program Files\Bandizip\bz.exe"
 
 if (-not (Test-Path $SteamExe)) {
   throw "Incredibox_steam.exe not found at $SteamExe"
 }
-if (-not (Test-Path $Bandizip)) {
-  throw "Bandizip bz.exe not found at $Bandizip"
-}
+Write-Host "GameDir:   $GameDir"
+Write-Host "TargetDir: $TargetDir"
+Write-Host "Bandizip:  $Bandizip"
 
 Write-Host "[1/5] Extracting app-64.7z from Incredibox_steam.exe..."
 $TempNsis = Join-Path $env:TEMP "incredibox_nsis_extract"

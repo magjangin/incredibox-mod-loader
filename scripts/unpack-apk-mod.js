@@ -2,39 +2,30 @@
 
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 const { execFileSync } = require('child_process');
-
-const BANDIZIP = 'C:\\Program Files\\Bandizip\\bz.exe';
-const DEFAULT_MODDED_DIR = 'H:\\steam\\steamapps\\common\\Incredibox\\Modded';
-
-function stableVersionId(name) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  }
-  return 9000000 + (Math.abs(hash) % 900000);
-}
-
-function parseAppJs(appJsPath) {
-  const code = fs.readFileSync(appJsPath, 'utf8');
-  const sandbox = { app: null };
-  vm.createContext(sandbox);
-  vm.runInContext(code, sandbox, { timeout: 2000 });
-  return sandbox.app;
-}
+const { stableVersionId, parseAppJs, findBandizip, findModdedDir } = require('./lib/common');
 
 function main() {
   const defaultApk = path.join(process.env.USERPROFILE, 'Downloads', 'Incredibox.apk');
   const apkPath = path.resolve(process.argv[2] || defaultApk);
-  const moddedDir = path.resolve(process.argv[3] || DEFAULT_MODDED_DIR);
+  const moddedArg = process.argv[3] || findModdedDir();
+  if (!moddedArg) {
+    console.error(
+      'Incredibox install not found via Steam. Usage: node unpack-apk-mod.js <mod.apk> <Incredibox\\Modded dir>'
+    );
+    process.exit(1);
+  }
+  const moddedDir = path.resolve(moddedArg);
 
   if (!fs.existsSync(apkPath)) {
     console.error(`APK not found: ${apkPath}`);
     process.exit(1);
   }
-  if (!fs.existsSync(BANDIZIP)) {
-    console.error(`Bandizip not found: ${BANDIZIP}`);
+  let BANDIZIP;
+  try {
+    BANDIZIP = findBandizip();
+  } catch (err) {
+    console.error(err.message);
     process.exit(1);
   }
 
