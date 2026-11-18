@@ -35,12 +35,16 @@ function createLogger() {
     logs.push(line);
     rawConsole.log(line);
     if (!logFile) {
+      // First write of this session: rotate the previous log so the file never grows unbounded.
       try {
         const modsDir = getModsDir();
         fs.mkdirSync(modsDir, { recursive: true });
         logFile = path.join(modsDir, 'modloader.log');
+        if (fs.existsSync(logFile)) {
+          fs.renameSync(logFile, path.join(modsDir, 'modloader.prev.log'));
+        }
       } catch (_) {
-        return;
+        if (!logFile) return;
       }
     }
     try {

@@ -2,10 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 const { execFileSync } = require('child_process');
-
-const BANDIZIP = 'C:\\Program Files\\Bandizip\\bz.exe';
+const { stableVersionId, parseAppJs, findBandizip } = require('./lib/common');
 
 function toDataURL(buf) {
   return 'data:application/octet-stream;base64,' + buf.toString('base64');
@@ -15,25 +13,6 @@ function normalizeColor(c, fallback = '#000000') {
   if (!c || typeof c !== 'string') return fallback;
   const trimmed = c.trim();
   return trimmed.startsWith('#') ? trimmed : '#' + trimmed;
-}
-
-function parseAppJs(appJsPath) {
-  const code = fs.readFileSync(appJsPath, 'utf8');
-  const sandbox = { app: null };
-  vm.createContext(sandbox);
-  vm.runInContext(code, sandbox, { timeout: 2000 });
-  if (!sandbox.app) {
-    throw new Error(`Failed to evaluate app object from ${appJsPath}`);
-  }
-  return sandbox.app;
-}
-
-function stableVersionId(name) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  }
-  return 9000000 + (Math.abs(hash) % 900000);
 }
 
 function getPngWidth(buf) {
@@ -228,8 +207,11 @@ function main() {
     console.error(`APK not found: ${apkPath}`);
     process.exit(1);
   }
-  if (!fs.existsSync(BANDIZIP)) {
-    console.error(`Bandizip not found: ${BANDIZIP}`);
+  let BANDIZIP;
+  try {
+    BANDIZIP = findBandizip();
+  } catch (err) {
+    console.error(err.message);
     process.exit(1);
   }
 
