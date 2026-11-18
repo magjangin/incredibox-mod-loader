@@ -33,8 +33,16 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-game.ps1
 - Steam 라이브러리에서 Incredibox 설치 경로를, Program Files/PATH에서 Bandizip을 **자동으로 찾습니다.**
 - 못 찾으면 직접 지정하세요: `-GameDir "<설치 경로>"`, `-Bandizip "<bz.exe 경로>"`, `-TargetDir "<풀 위치>"` (기본값 `<GameDir>\Modded`)
 
-설치가 끝나면 **`<GameDir>\Modded\Incredibox.exe`** 로 실행합니다. 원본 `Incredibox_steam.exe`는 건드리지 않습니다.
-왼쪽 아래에 `ModLoader v0.2.0 (… JS, … APK) [F10]` 배지가 보이면 성공입니다.
+설치가 끝나면 **Steam에서 그대로 ▶ 플레이**하면 됩니다.
+셋업이 `Incredibox_steam.exe`를 작은 런처로 바꾸고(원본은 `Incredibox_steam.original.exe`로 보관), 런처가 `Modded\Incredibox.exe`를 실행합니다.
+왼쪽 아래에 `ModLoader v0.2.0 (… JS, … APK) [F10]` 배지가 보이면 모드 로더로 실행된 것입니다.
+
+| 상황 | 방법 |
+| --- | --- |
+| 원본(바닐라) 게임으로 한 번만 실행 | **Shift**를 누른 채로 Steam에서 플레이 |
+| 런처 없이 설치 | `setup-game.ps1 -NoLauncher` (이 경우 `Modded\Incredibox.exe`를 직접 실행) |
+| 원래대로 되돌리기 | `setup-game.ps1 -Uninstall` (원본 exe 복원, `Modded\`는 남김) |
+| Steam이 게임을 업데이트/무결성 검사한 뒤 | 런처가 원본으로 덮어써지므로 `setup-game.ps1`을 다시 실행 |
 
 ## 단축키
 
@@ -85,7 +93,11 @@ PC판은 아이콘 20개·폴로 7명이 고정이라 100캐릭터 모드가 그
 node scripts\unpack-apk-mod.js "C:\path\to\mod.apk"
 ```
 
-`Modded\ApkMods\<모드 이름>\`에 풀리고, 게임에서 `F10` → **Play**로 실행합니다. 오버레이의 `-`/`+`로 화면 배율 조절, **Back to PC Incredibox**로 복귀합니다.
+`Modded\ApkMods\<모드 이름>\`에 풀리고, 게임에서 `F10` → **Play**(또는 IMPORTED 목록의 같은 모드 ▶)로 실행합니다. 오버레이의 `-`/`+`로 화면 배율 조절, **Back to PC Incredibox**(또는 창 닫기)로 복귀합니다.
+
+- APK 모드는 **별도 창 + 별도 저장소**에서 실행됩니다. PC판과 저장 데이터(믹스, 언어 설정)가 섞이지 않습니다.
+- APK 모드에서 만든 믹스는 `ApkMods\<모드>\saves\`에 자동 백업됩니다 (`backup-latest.json`, 지워진 것까지 모두 남는 `backup-archive.json`).
+- 백업에서 되살리려면 `ApkMods\<모드>\restore\` 에 `{"key": "mix-…", "value": "<backup의 값>"}` 형식 JSON을 넣고 그 모드를 실행하세요.
 
 > 참고: 이 스크립트는 녹음 길이 제한(`recmaxloop`)을 999 루프로 늘리고 안드로이드 전용 `cordova.js`를 비활성화합니다.
 
@@ -109,6 +121,7 @@ modloader/main.js ── Mods/·ApkMods/ 스캔, 로그, DevTools 단축키, Ste
 ## 프로젝트 구조
 
 ```
+launcher/         Steam 실행 파일 자리에 들어가는 런처 (C#, 셋업 때 .NET Framework csc로 빌드)
 modloader/        메인 프로세스 부트스트랩(main.js), 렌더러 API·오버레이(renderer.js)
 scripts/          setup-game.ps1, extract-asar.js, unpack-apk-mod.js, import-apk.js, lib/common.js
 mods-example/     샘플 모드
@@ -116,6 +129,6 @@ mods-example/     샘플 모드
 
 ## 문제 해결
 
-- **배지가 안 보임** → `Modded\Mods\modloader.log` 확인, `Modded\Incredibox.exe`로 실행했는지 확인
+- **배지가 안 보임** → 원본으로 실행된 것입니다. Shift를 누르고 있지 않았는지, Steam 업데이트로 런처가 덮어써지지 않았는지 확인하고 `setup-game.ps1`을 다시 실행하세요. 로그는 `Modded\Mods\modloader.log`
 - **Incredibox/Bandizip을 못 찾음** → `-GameDir`, `-Bandizip` 인자 또는 환경변수 `INCREDIBOX_DIR`, `BANDIZIP` 지정
 - **게임 업데이트 후 동작 안 함** → `setup-game.ps1`을 다시 실행 (Modded 폴더를 새로 풀고 로더를 다시 설치)

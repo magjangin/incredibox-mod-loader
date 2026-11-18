@@ -63,7 +63,8 @@ function main() {
   const safeFolder = modName.replace(/[<>:"/\\|?*]+/g, '_');
   const destRoot = path.join(moddedDir, 'ApkMods', safeFolder);
   const destWww = path.join(destRoot, 'www');
-  fs.rmSync(destRoot, { recursive: true, force: true });
+  // Replace only the engine files. saves/ (automatic mix backups) and restore/ are user data.
+  fs.rmSync(destWww, { recursive: true, force: true });
   fs.mkdirSync(destRoot, { recursive: true });
   fs.cpSync(wwwSrc, destWww, { recursive: true });
 

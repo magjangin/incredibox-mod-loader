@@ -12,3 +12,9 @@ node_modules/
 .claude/settings.local.json
 Thumbs.db
 desktop.ini
+
+# Local launcher build output
+build/
+
+# Local save backups (user data)
+_save-backup/

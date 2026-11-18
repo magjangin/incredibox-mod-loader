@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { app, BrowserWindow, ipcMain } = require('electron');
 
@@ -138,6 +139,9 @@ function discoverApkMods() {
         characters: meta.characters || 0,
         nbpolo: meta.nbpolo || 7,
         entryUrl,
+        // main-process only (not sent to the renderer)
+        dir: modDir,
+        wwwBaseUrl: pathToFileURL(wwwDir).href.replace(/\/?$/, '/'),
       });
     } catch (err) {
       logger.error(`Failed to parse ${metaPath}: ${err.message}`);
@@ -204,9 +208,210 @@ function buildRendererPayload() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// APK mods run in their own BrowserWindow with a persistent session partition.
+//
+// Why: APK engines and the PC game both store mixes in localStorage under
+// "mix-<link>". Sharing the file:// origin let the PC game's deleteOldLocalMixes()
+// (deletes any mix whose link mixes digits+letters) wipe APK mixes, and the APK
+// engine overwrote the PC "user-lang". A separate partition = separate storage.
+// ---------------------------------------------------------------------------
+const PC_SRC_DIR = path.resolve(__dirname, '../src');
+const PC_INDEX_URL = pathToFileURL(path.join(PC_SRC_DIR, 'index.html')).href;
+const PC_SRC_BASE_URL = pathToFileURL(PC_SRC_DIR).href.replace(/\/?$/, '/');
+const BACKUP_INTERVAL_MS = 30 * 1000;
+
+const apkWindows = new Map(); // apkMod.id -> BrowserWindow
+let pcWindow = null;
+
+function publicApkMods() {
+  return apkMods.map(({ id, name, versionId, characters, nbpolo, entryUrl }) => ({
+    id,
+    name,
+    versionId,
+    characters,
+    nbpolo,
+    entryUrl,
+  }));
+}
+
+function findApkModForUrl(url) {
+  return (
+    apkMods.find((m) => m.versionId && url.includes(`app.html?v=${m.versionId}`)) ||
+    apkMods.find((m) => url.startsWith(m.wwwBaseUrl))
+  );
+}
+
+function partitionFor(apkMod) {
+  const safe = apkMod.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const hash = crypto.createHash('sha1').update(apkMod.id).digest('hex').slice(0, 8);
+  return `persist:apkmod-${safe}-${hash}`;
+}
+
+function apkWebPreferences(parent, apkMod) {
+  let prefs = {};
+  try {
+    if (typeof parent.webContents.getLastWebPreferences === 'function') {
+      prefs = parent.webContents.getLastWebPreferences() || {};
+    }
+  } catch (_) {
+    prefs = {};
+  }
+  const fallbackPreload = path.join(PC_SRC_DIR, 'elec-preload.js');
+  const webPreferences = {
+    // Same preload as the PC game: APK engines call _electron.machine.machineIdSync() on desktop.
+    preload: prefs.preload || (fs.existsSync(fallbackPreload) ? fallbackPreload : undefined),
+    contextIsolation: prefs.contextIsolation !== false,
+    nodeIntegration: false,
+    partition: partitionFor(apkMod),
+  };
+  if (typeof prefs.sandbox === 'boolean') webPreferences.sandbox = prefs.sandbox;
+  if (typeof prefs.webSecurity === 'boolean') webPreferences.webSecurity = prefs.webSecurity;
+  if (!webPreferences.preload) delete webPreferences.preload;
+  return webPreferences;
+}
+
+// Restore files: <ApkMods>/<mod>/restore/*.json = { "key": "...", "value": "..." }
+// Written into the mod's localStorage only if the key is missing, then moved to restore/done/.
+async function applyPendingRestores(apkMod, wc) {
+  const dir = path.join(apkMod.dir, 'restore');
+  if (!fs.existsSync(dir)) return;
+  for (const file of fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.json'))) {
+    const filePath = path.join(dir, file);
+    try {
+      const { key, value } = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      if (typeof key !== 'string' || typeof value !== 'string') {
+        throw new Error('restore file must be {"key": string, "value": string}');
+      }
+      const result = await wc.executeJavaScript(
+        `(() => { const k = ${JSON.stringify(key)};
+          if (localStorage.getItem(k) !== null) return 'exists';
+          localStorage.setItem(k, ${JSON.stringify(value)}); return 'restored'; })()`
+      );
+      const doneDir = path.join(dir, 'done');
+      fs.mkdirSync(doneDir, { recursive: true });
+      fs.renameSync(filePath, path.join(doneDir, file));
+      logger.info(`[${apkMod.id}] Restore ${key}: ${result}.`);
+    } catch (err) {
+      logger.error(`[${apkMod.id}] Restore ${file} failed: ${err.message}`);
+    }
+  }
+}
+
+// Mirrors every mix-/fav- entry to <ApkMods>/<mod>/saves/:
+//   backup-latest.json   exact current set (previous version kept as backup-previous.json)
+//   backup-archive.json  union of everything ever seen (entries are never removed)
+async function backupApkSaves(apkMod, wc) {
+  if (!wc || wc.isDestroyed()) return;
+  try {
+    const json = await wc.executeJavaScript(
+      `(() => { const o = {}; for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i); if (/^(mix|fav)-/.test(k)) o[k] = localStorage.getItem(k); }
+        return JSON.stringify(o); })()`
+    );
+    const items = JSON.parse(json);
+    const dir = path.join(apkMod.dir, 'saves');
+    fs.mkdirSync(dir, { recursive: true });
+    const now = new Date().toISOString();
+
+    const archivePath = path.join(dir, 'backup-archive.json');
+    let archive = { mod: apkMod.name, items: {} };
+    if (fs.existsSync(archivePath)) archive = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+    let archiveChanged = false;
+    for (const [k, v] of Object.entries(items)) {
+      if (archive.items[k] !== v) {
+        archive.items[k] = v;
+        archiveChanged = true;
+      }
+    }
+    if (archiveChanged) {
+      archive.updatedAt = now;
+      fs.writeFileSync(archivePath, JSON.stringify(archive, null, 1), 'utf8');
+    }
+
+    const latestPath = path.join(dir, 'backup-latest.json');
+    if (fs.existsSync(latestPath)) {
+      const prev = JSON.parse(fs.readFileSync(latestPath, 'utf8'));
+      if (JSON.stringify(prev.items) === JSON.stringify(items)) return;
+      fs.copyFileSync(latestPath, path.join(dir, 'backup-previous.json'));
+    }
+    fs.writeFileSync(latestPath, JSON.stringify({ mod: apkMod.name, savedAt: now, items }, null, 1), 'utf8');
+    logger.info(`[${apkMod.id}] Saves backed up (${Object.keys(items).length} mix/fav).`);
+  } catch (err) {
+    logger.warn(`[${apkMod.id}] Save backup failed: ${err.message}`);
+  }
+}
+
+function showPcWindow() {
+  if (apkWindows.size > 0) return;
+  if (pcWindow && !pcWindow.isDestroyed()) {
+    pcWindow.show();
+    pcWindow.focus();
+  }
+}
+
+function openApkWindow(apkMod, fromWin) {
+  const existing = apkWindows.get(apkMod.id);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return existing;
+  }
+
+  const parent = pcWindow && !pcWindow.isDestroyed() ? pcWindow : fromWin;
+  const win = new BrowserWindow({
+    ...parent.getBounds(),
+    show: false,
+    backgroundColor: '#000000',
+    autoHideMenuBar: true,
+    title: `Incredibox - ${apkMod.name}`,
+    webPreferences: apkWebPreferences(parent, apkMod),
+  });
+  win.__apkModId = apkMod.id;
+  apkWindows.set(apkMod.id, win);
+  logger.info(`[${apkMod.id}] Opening APK mod window (partition ${partitionFor(apkMod)}).`);
+
+  let shown = false;
+  const reveal = () => {
+    if (shown || win.isDestroyed()) return;
+    shown = true;
+    if (parent.isFullScreen()) win.setFullScreen(true);
+    else if (parent.isMaximized()) win.maximize();
+    win.show();
+    win.focus();
+    if (parent !== win && !parent.isDestroyed()) parent.hide();
+  };
+  win.once('ready-to-show', reveal);
+  setTimeout(reveal, 4000);
+
+  const timer = setInterval(() => backupApkSaves(apkMod, win.webContents), BACKUP_INTERVAL_MS);
+  let backedUpOnClose = false;
+  win.on('close', (event) => {
+    if (backedUpOnClose) return;
+    event.preventDefault();
+    backedUpOnClose = true;
+    backupApkSaves(apkMod, win.webContents).finally(() => {
+      if (!win.isDestroyed()) win.destroy();
+    });
+  });
+  win.on('closed', () => {
+    clearInterval(timer);
+    apkWindows.delete(apkMod.id);
+    showPcWindow();
+  });
+
+  win.loadURL(apkMod.entryUrl);
+  return win;
+}
+
 function attachWindowHooks(win) {
   const wc = win.webContents;
-  const pcIndexUrl = pathToFileURL(path.resolve(__dirname, '../src/index.html')).href;
+  const pcIndexUrl = PC_INDEX_URL;
+
+  // Constructor emits browser-window-created before __apkModId is set, so decide on the next tick.
+  setImmediate(() => {
+    if (!pcWindow && !win.__apkModId) pcWindow = win;
+  });
 
   wc.on('before-input-event', (event, input) => {
     const isF12 = input.key === 'F12' && input.type === 'keyDown';
@@ -223,27 +428,40 @@ function attachWindowHooks(win) {
   });
 
   wc.on('will-navigate', (event, url) => {
-    for (const apkMod of apkMods) {
-      if (apkMod.versionId && url.includes(`app.html?v=${apkMod.versionId}`)) {
-        logger.info(`Redirecting v=${apkMod.versionId} to APK mod "${apkMod.name}": ${apkMod.entryUrl}`);
-        event.preventDefault();
-        wc.loadURL(apkMod.entryUrl);
-        return;
-      }
+    const target = findApkModForUrl(url);
+    if (target) {
+      if (win.__apkModId === target.id) return; // navigation inside this APK mod's own pages
+      event.preventDefault();
+      logger.info(`Opening APK mod "${target.name}" for ${url}`);
+      openApkWindow(target, win);
+      if (win.__apkModId) win.close(); // switching from one APK mod to another
+      return;
+    }
+    if (win.__apkModId && url.startsWith(PC_SRC_BASE_URL)) {
+      // "Back to PC Incredibox" from an APK window: close it, the PC window comes back.
+      event.preventDefault();
+      win.close();
     }
   });
 
   wc.on('dom-ready', async () => {
     try {
       const currentUrl = wc.getURL();
-      for (const apkMod of apkMods) {
-        if (apkMod.versionId && currentUrl.includes(`app.html?v=${apkMod.versionId}`)) {
-          logger.info(`Redirecting (dom-ready) v=${apkMod.versionId} to APK mod "${apkMod.name}": ${apkMod.entryUrl}`);
-          wc.loadURL(apkMod.entryUrl);
-          return;
-        }
+      const target = findApkModForUrl(currentUrl);
+      if (target && win.__apkModId !== target.id) {
+        // Navigation that bypassed will-navigate (e.g. main-process loadURL).
+        logger.info(`Opening APK mod "${target.name}" (dom-ready) for ${currentUrl}`);
+        openApkWindow(target, win);
+        if (win.__apkModId) win.close();
+        else wc.loadURL(PC_INDEX_URL);
+        return;
       }
-      const isApkMode = currentUrl.includes('/ApkMods/');
+      const apkMod = win.__apkModId ? apkMods.find((m) => m.id === win.__apkModId) : null;
+      if (apkMod) {
+        await applyPendingRestores(apkMod, wc);
+        await backupApkSaves(apkMod, wc);
+      }
+      const isApkMode = Boolean(apkMod);
       const rendererBootstrapPath = path.join(__dirname, 'renderer.js');
       const bootstrapCode = fs.readFileSync(rendererBootstrapPath, 'utf8');
       const modsPayload = buildRendererPayload();
@@ -253,7 +471,7 @@ function attachWindowHooks(win) {
           window.__INCREDIBOX_MODLOADER_INIT__ = ${JSON.stringify({
             version: LOADER_VERSION,
             mods: modsPayload,
-            apkMods,
+            apkMods: publicApkMods(),
             isApkMode,
             pcIndexUrl,
           })};
