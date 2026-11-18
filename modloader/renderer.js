@@ -129,6 +129,39 @@
     window.addEventListener('resize', () => setTimeout(() => layoutApkPictos(true), 80));
     setTimeout(() => layoutApkPictos(true), 400);
     setTimeout(() => layoutApkPictos(true), 1200);
+
+    // Replay seek fix: the APK engine's moveControlHead() maps pageX to a loop index with
+    // `(pageX - $incredibox.offsetLeft) / (screenW - 2 * offsetLeft)`, i.e. unscaled layout
+    // coordinates. With our body `scale(apkScale)` (origin center) the visible stage starts
+    // (1 - scale) / 2 of the width further right, so at 90% the leftmost point seeks to 5%
+    // (e.g. 1:19 of a 26:14 mix) and the end is unreachable. Use the on-screen rect instead.
+    function patchReplaySeek() {
+      const orig = window.moveControlHead;
+      if (typeof orig !== 'function' || orig.__modloaderPatched) return typeof orig === 'function';
+      const patched = function (e) {
+        try {
+          const bar = window.readingBar;
+          const stage = window.$incredibox && window.$incredibox[0];
+          let p = e;
+          if (p && typeof p.type === 'string' && p.type.indexOf('touch') !== -1) p = p.originalEvent || p;
+          if (p && p.targetTouches && p.targetTouches.length) p = p.targetTouches[0];
+          const rect = stage && stage.getBoundingClientRect();
+          if (!bar || !rect || !(rect.width > 0) || !(bar.maxLoop > 0) || typeof p.clientX !== 'number') {
+            return orig.apply(this, arguments);
+          }
+          let i = Math.floor((bar.maxLoop * (p.clientX - rect.left)) / rect.width);
+          i = Math.max(0, Math.min(bar.maxLoop - 1, i));
+          bar.seek(i);
+        } catch (err) {
+          console.error('[ModLoader] replay seek patch failed, using original:', err);
+          return orig.apply(this, arguments);
+        }
+      };
+      patched.__modloaderPatched = true;
+      window.moveControlHead = patched;
+      return true;
+    }
+    if (!patchReplaySeek()) window.addEventListener('load', patchReplaySeek, { once: true });
   }
 
   // Inject CSS & JS for each discovered JS mod
