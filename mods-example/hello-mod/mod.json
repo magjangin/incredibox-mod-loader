@@ -1,0 +1,9 @@
+{
+  "id": "hello-mod",
+  "name": "Hello Incredibox",
+  "version": "1.0.0",
+  "author": "Hwa-young-wang",
+  "description": "Sample mod verifying Incredibox ModLoader bootstrap.",
+  "renderer": "renderer.js",
+  "enabled": true
+}

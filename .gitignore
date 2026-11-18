@@ -1,0 +1,14 @@
+# Game files / extracted runtime (never commit)
+Modded/
+*.asar
+*.asar.bak
+*.7z
+*.apk
+ApkMods/
+
+# Logs & temp
+*.log
+node_modules/
+.claude/settings.local.json
+Thumbs.db
+desktop.ini
