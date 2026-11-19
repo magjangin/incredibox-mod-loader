@@ -119,12 +119,16 @@ PC판 기본 모드 슬롯(20캐릭터)으로 가져오려면 `node scripts\impo
 Cocrea/Scratch의 Sprunki 계열 작품(`.sb3`)을 PC판 Incredibox 모드로 변환합니다. 캐릭터 애니메이션은 원작 스크립트를 시뮬레이션해서 재현하고, 사운드는 원작처럼 겹쳐 재생되는 소리를 그대로 섞어 정확한 길이의 A/B 루프로 만듭니다. 원작과 같은 구도로 그리고, 결과는 **IMPORTED** 목록에 등록됩니다.
 
 ```powershell
-cd scripts\sb3-to-incredimod
-node prepare.js "<작품.sb3>" --work "<저장소 밖 작업 폴더>"
-node build-art.js --work "<작업 폴더>"; node build-audio.js --work "<작업 폴더>"; node build-pack.js --work "<작업 폴더>" --install
+node scripts\sb3-to-incredimod\convert.js "<작품.sb3>" --work "<저장소 밖 작업 폴더>" --install
 ```
 
+`config.js`가 없으면 작품을 분석해 자동으로 만듭니다(템포, 슬롯 간격, 배경, 커버, 캐릭터 이름). 원작자·출처처럼 `TODO`로 표시된 줄은 확인해 주세요. 게임이 켜져 있으면 설치를 거부합니다(게임이 `localmods.json`을 덮어쓰기 때문).
+
 > 리믹스를 허용한 작품만 변환하고, 원작자 크레딧을 남기세요. 원작 파일과 변환 결과물은 저장소에 올리지 마세요. 자세한 내용: [scripts/sb3-to-incredimod/README.md](scripts/sb3-to-incredimod/README.md)
+
+## 개발 예정
+
+- **100아이콘 / 10폴로 모드 제작기:** 안드로이드 모드 APK나 Scratch `.sb3`에서 캐릭터를 뽑아 100캐릭터(20 × 5줄)·폴로 10명짜리 모드를 만드는 기능. PC판 엔진은 아이콘 20개·폴로 7명으로 고정돼 있어 별도 작업이 필요합니다. 계획과 검토할 방식은 [AGENTS.md](AGENTS.md) §5에 있습니다.
 
 ## 동작 원리
 

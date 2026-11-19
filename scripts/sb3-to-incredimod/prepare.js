@@ -39,6 +39,9 @@ project.targets.forEach((t, i) =>
 
 const cfg = path.join(work, 'config.js');
 if (!fs.existsSync(cfg)) {
-  fs.copyFileSync(path.join(__dirname, 'configs', 'sprunke-kusoshi.js'), cfg);
-  console.log(`\nwrote ${cfg} from the Sprunke Kusoshi example - edit names, phases and slugs before building.`);
+  const { autoConfig } = require('./autoconfig');
+  fs.writeFileSync(cfg, autoConfig(project, path.basename(sb3)), 'utf8');
+  console.log(`\nwrote ${cfg} (auto-detected; check the TODO lines - at least author/source).`);
+} else {
+  console.log(`\nkept existing ${cfg}`);
 }

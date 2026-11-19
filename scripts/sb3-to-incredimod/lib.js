@@ -7,6 +7,7 @@
 //   --phase <n>      Scratch "phase" to convert (default 1)
 //   --install        build-pack: copy into %APPDATA%\Incredibox\incredimods and register it
 //   --measure-only   build-art: print the costume measurements only
+//   --force          build-pack / convert: install even while the game is running
 
 const fs = require('fs');
 const path = require('path');
@@ -41,4 +42,18 @@ function getOptions(argv = process.argv.slice(2)) {
   };
 }
 
-module.exports = { getOptions };
+// The game rewrites localmods.json while it runs, so an install made then is lost.
+// Windows only; tasklist prints "INFO: No tasks ..." when nothing matches.
+function gameRunning() {
+  if (process.platform !== 'win32') return false;
+  try {
+    const out = require('child_process').execFileSync('tasklist', ['/FI', 'IMAGENAME eq Incredibox*', '/FO', 'CSV', '/NH'], {
+      encoding: 'utf8',
+    });
+    return /"Incredibox/i.test(out);
+  } catch (_) {
+    return false;
+  }
+}
+
+module.exports = { getOptions, gameRunning };
