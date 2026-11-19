@@ -2,7 +2,7 @@
   if (window.IncrediboxModLoader) return;
 
   const init = window.__INCREDIBOX_MODLOADER_INIT__ || {
-    version: '0.3.0',
+    version: '0.3.1',
     mods: [],
     apkMods: [],
     isApkMode: false,
@@ -162,6 +162,58 @@
       return true;
     }
     if (!patchReplaySeek()) window.addEventListener('load', patchReplaySeek, { once: true });
+
+    // Home "back to PC" button. APK (Android) engines have no incredimod buttons
+    // (#home-bt-modlist / #home-bt-modcredit exist only in the PC app.html), so the
+    // top-left corner of the APK home is empty. Put a round button there, sized and
+    // themed like the engine's own #home-bt-info (.bt in #home -> var(--col1) colours),
+    // and show it whenever the engine animates #home-bt-info in.
+    function addApkHomeBackButton() {
+      const home = document.getElementById('home');
+      if (!home || document.getElementById('ml-home-bt-backpc')) return;
+
+      const style = document.createElement('style');
+      style.id = 'ml-home-bt-backpc-css';
+      style.textContent = `
+        #home .bt#ml-home-bt-backpc { top: 44px; left: 44px; width: 44px; height: 44px; min-width: 0; min-height: 0; }
+        #home .bt#ml-home-bt-backpc .bck { line-height: 0; }
+        #home .bt#ml-home-bt-backpc.animate { animation: ml-home-bt-in .3s cubic-bezier(.175,.885,.32,1.275) 0s forwards; }
+        @keyframes ml-home-bt-in {
+          0% { opacity: 0; transform: scale(.5); }
+          to { opacity: 1; transform: scale(1); cursor: pointer; }
+        }
+        body.mobile #home .bt#ml-home-bt-backpc { width: 60px; height: 60px; }
+        body.ultrawide #home .bt#ml-home-bt-backpc { margin-left: 50px; }
+        body.miniPlayer #home #ml-home-bt-backpc, .expo #ml-home-bt-backpc { display: none; }
+      `;
+      document.head.appendChild(style);
+
+      const btn = document.createElement('div');
+      btn.id = 'ml-home-bt-backpc';
+      btn.className = 'bt';
+      btn.title = 'Back to PC Incredibox (mod list)';
+      btn.innerHTML =
+        '<div class="bck"><svg class="icn-svg" viewBox="0 0 32 32">' +
+        '<path d="M9 16 15.5 9.5 17.4 11.4 14.1 14.7H23V17.3H14.1L17.4 20.6 15.5 22.5Z"></path>' +
+        '</svg></div><div class="hitzone"></div>';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        api.backToPc();
+      });
+      home.appendChild(btn);
+
+      const info = document.getElementById('home-bt-info');
+      if (!info) {
+        btn.classList.add('animate');
+        return;
+      }
+      const sync = () => btn.classList.toggle('animate', info.classList.contains('animate'));
+      sync();
+      new MutationObserver(sync).observe(info, { attributes: true, attributeFilter: ['class'] });
+    }
+    if (document.getElementById('home')) addApkHomeBackButton();
+    else window.addEventListener('DOMContentLoaded', addApkHomeBackButton, { once: true });
   } else {
     // PC mode: multi-row 20-column picto grid for >20-character mods (e.g. 100 chars = 5x20).
     // Standard <=20-character mods are left untouched.

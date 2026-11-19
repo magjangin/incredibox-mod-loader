@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-game.ps1
 
 설치가 끝나면 **Steam에서 그대로 ▶ 플레이**하면 됩니다.
 셋업이 `Incredibox_steam.exe`를 작은 런처로 바꾸고(원본은 `Incredibox_steam.original.exe`로 보관), 런처가 `Modded\Incredibox.exe`를 실행합니다.
-왼쪽 아래에 `ModLoader v0.3.0 (… JS, … APK) [F10]` 배지가 보이면 모드 로더로 실행된 것입니다.
+왼쪽 아래에 `ModLoader v0.3.1 (… JS, … APK) [F10]` 배지가 보이면 모드 로더로 실행된 것입니다.
 
 | 상황 | 방법 |
 | --- | --- |
@@ -106,7 +106,7 @@ APK에 들어 있는 웹 엔진째로 풀어서, 원래 안드로이드판과 �
 node scripts\unpack-apk-mod.js "C:\path\to\mod.apk"
 ```
 
-`Modded\ApkMods\<모드 이름>\`에 풀리고, 게임에서 `F10` → **Play**(또는 IMPORTED 목록의 같은 모드 ▶)로 실행합니다. 오버레이의 `-`/`+`로 화면 배율 조절, **Back to PC Incredibox**(또는 창 닫기)로 복귀합니다.
+`Modded\ApkMods\<모드 이름>\`에 풀리고, 게임에서 `F10` → **Play**(또는 IMPORTED 목록의 같은 모드 ▶)로 실행합니다. 오버레이의 `-`/`+`로 화면 배율 조절, **Back to PC Incredibox**(또는 창 닫기)로 복귀합니다. 안드로이드 엔진에는 PC판의 모드 목록·크레딧 버튼이 없어서, 0.3.1부터는 APK 홈 화면 왼쪽 위에 같은 모양의 **← (PC로 돌아가기)** 버튼을 로더가 넣어 줍니다.
 
 - APK 모드는 **별도 창 + 별도 저장소**에서 실행됩니다. PC판과 저장 데이터(믹스, 언어 설정)가 섞이지 않습니다.
 - APK 모드에서 만든 믹스는 `ApkMods\<모드>\saves\`에 자동 백업됩니다 (`backup-latest.json`, 지워진 것까지 모두 남는 `backup-archive.json`).
