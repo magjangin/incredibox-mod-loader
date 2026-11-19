@@ -21,6 +21,7 @@
 - `scripts/import-apk.js` — Converts Android Incredibox mod APKs (`assets/www/asset-v*`) into PC `incredimods/<versionId>.json` + `localmods.json` entries under `%APPDATA%\Incredibox\incredimods\`.
 - `scripts/unpack-apk-mod.js` — Extracts full `assets/www/` from Android mod APKs into `Modded\ApkMods\<ModName>\` for 100-character / custom-engine playback via the ModLoader `F10` overlay.
 - `scripts/sb3-to-incredimod/` — Converts a Sprunki-style Scratch `.sb3` into a PC incredimod: Scratch timeline interpreter, headless-Edge SVG rendering, ffmpeg A/B loops, and the pack installer.
+- `scripts/build-100p-mod.js` — Multi-mod 100-character / 10-polo incredimod builder combining PC incredimods, APKs, ASAR ZIPs, and unpacked dirs into one unified-BPM pack.
 - `installer/IncrediboxModLoaderInstaller.cs` + `scripts/build-installer.ps1` — Single-exe GUI/CLI installer (no Node/Bandizip needed on Windows 11), see §3.0.0.
 - `launcher/IncrediboxLauncher.cs` — Steam `Incredibox_steam.exe` replacement that starts `Modded\Incredibox.exe`.
 - `mods-example/hello-mod/` — Sample mod manifest (`mod.json`) and `renderer.js`.
@@ -74,6 +75,24 @@
 - **Workflow (2026-11-19):** `prepare.js` writes a draft `config.js` (`autoconfig.js`): name from the file name (`_ ` → `: `, `[tags]` dropped), `platform` from `meta.platform`, tempo from the saved stage `Delay` (16 beats per loop), `slotUnits`/`slotY` from the median `Polo N` x gap / y, backdrop and cover from the current costumes, slugs from sprite names, `framing.fitTop: true` (auto `dy` so the union box top is ≥ 2 LD; it reproduced Interbox's hand-tuned Effect 3 `dy 18`), and `TODO` lines for author/source and phase-2 tempo (the saved `Delay` is whichever phase was active, e.g. Kusoshi saved 6.85 = phase 2). `build-pack.js --install` and `convert.js --install` refuse while `Incredibox*` is in `tasklist` (`--force` overrides) and keep only the newest 5 `localmods.json.bak-*`. Agents still must not launch the game; the check only reads the process list.
 - **Rendering:** headless Edge (`--headless=new`, CDP over the global `WebSocket`) draws SVG costumes into canvas from data URLs. In Git Bash heredocs `\\x` and `${…}` get mangled, so write such scripts with the Write tool.
 
+## 3.0.4 Native PC 100-Icon / 10-Polo Engine Patch & Multi-Mod Builder (2026-11-19)
+- **Route (b) succeeded — no third-party APK engine needed:** PC v1.2.9 `script.min.js` already iterates `lQ` (icon count) and `pQ` (polo count) in every game/audio/mix loop, with only 5 hardcoded constants/hooks.
+- **Engine patch (`modloader/main.js`, `ensurePcEnginePatched`, marker `/*INCREDIBOX_MODLOADER_100P_V3*/`):** backs up `src/js/script.min.js` once to `script.min.js.orig` (re-patches from `.orig` on marker upgrades) and applies 5 exact single-match replacements:
+  1. Remove `>0x14?0x14:lQ` cap in `m2()` so `lQ = px.animearray.length`.
+  2. In `pV()`, sets `px.recmaxloop = Math.max(999, Math.ceil(9999000 / (px.looptime || 8000)))` (≥ 9999s / ≥ 999 loops recording limit across ALL vanilla & custom PC mods), defaults missing `recminloop`/`recmintime` (`2`), and sets `pQ = (px && px.nbpolo > 0 ? px.nbpolo : 7)`.
+  3. `aq = (pQ > 7 ? pQ - 0.2 : 6.8), ak *= (aq / 6.8)` and `aq = (pQ > 7 ? pQ - 0.5 : 6.3), ak *= (aq / 6.3)` in `window.onresize` — scales polo width AND shrinks effective stage height proportionally so 10 polos have the same tight headroom as 7 polos without shrinking polo size.
+  4. Calls `window.__mlLayoutPcPictos(lQ, pQ)` right before `poloBlocGapX = av / 2` on every resize.
+- **PC 100p layout (`modloader/renderer.js`):** when `#box-picto .picto` count `> 20`, adds `html.ml-100p-mode` (`--box-top-height-int: 10`, `--box-bottom-height-int: 50`, stage `40%`) and arranges pictos into `ceil(N/20)` `.pictoline` rows of 20 icons with 5-icon group gaps (native pixels, no CSS `transform: scale`). Standard ≤20-icon / 7-polo mods are completely untouched.
+- **Multi-mod builder (`scripts/build-100p-mod.js`):** merges 20-char sources (`incredimod` JSON, `apk`, `asar-zip`, or unpacked `dir`) into one PC incredimod pack:
+  - **Audio:** 8-way parallel ffmpeg `atempo` (pitch-preserving) to master `looptime` (optional `doubleLoop: true` concatenates A+B or A+A for double-BPM mods like Kusoshi 200 BPM 4.8s × 2 = 9.6s → 8.0s).
+  - **Animation gotchas fixed:**
+    - Master `totalframe = 488` (244 frames/loop) so none of the 5 mods drop frames (previously 384 dropped 20–25% of frames).
+    - Slices exact `src.totalframe / 2` per source loop instead of `origFrames.length` — avoids playing unused overflow frames (e.g. Arbox Armed `11_rammy` has 338 frames vs 244 loop) and repeats 1-loop anims for 2-loop audio (Beatboys `12_Cello`).
+    - Normalizes legacy `width: 328, height: 760` Axiom JSONs (whose `prop` coords are LD `164×380`) to `164 × 380`.
+    - Fixes floating full-body characters whose JSON sets `headHeight: 360` on 380px+ tall frames (Arbox Armed `4_spikes`, `8_tourette`, `10_nimbus`, `19_explorer`) by raising `headHeight` to `380`.
+  - **VRAM / lag optimization:** defaults to LD (`format: ["ld", "ogg"]`, `iconSize: 68` → `6800×136` `game-picto.png`) when total chars `> 40`. Cuts 100-char uncompressed RGBA VRAM 4× (**2,724 MB → 681 MB**) and pack JSON from **155 MB → 67 MB** with zero visual loss at 10-polo width (~112–150 px).
+- **First built & verified pack (in game by the user, 2026-11-19):** **`5-Mod Mashup 100p`** (`versionId = 9027675`, 120 BPM, 8000 ms, `totalframe = 488`, `nbpolo = 10`, LD, 67.17 MB) combining Sprunke Kusoshi, Interbox V1: Subliminal, The Beatboys v1: Tremors, Arbox Ep.4 v4: Armed, and Incredibox - Axiom. Work folder: `H:\source\incredibox-work\mashup-100p\`.
+
 ## 3.1 Conventions / Gotchas
 - **Overlay HTML:** all mod / APK metadata (name, author, description, error, id) goes through `escapeHtml` in `modloader/renderer.js` before `innerHTML`. APK `app.js` names are third-party text.
 - **Logging:** first log write per launch renames `Mods/modloader.log` → `Mods/modloader.prev.log` (keeps exactly one previous session).
@@ -102,9 +121,11 @@ sb3 → incredimod (close the game first):
 node scripts\sb3-to-incredimod\convert.js "C:\path\project.sb3" --work H:\source\incredibox-work\<name> --install
 ```
 
+100-char / 10-polo mashup builder (close the game first):
+```powershell
+node scripts\build-100p-mod.js H:\source\incredibox-work\mashup-100p\config.json --install
+```
+
 ## 5. Next Plan
-- **Planned (requested by the user, 2026-11-19): 100-icon / 10-polo mod builder.** Build a mod with 100 characters (5 rows × 20 icons) and 10 polos from material extracted from **Android mod APKs** (`assets/www/asset-v*`) or **Scratch `.sb3`** projects (one or several, e.g. merging multiple 20-character sb3s).
-  - **Why it needs its own work:** PC v1.2.9 `script.min.js` hardcodes 20 icons and 7 polos (§2), so a PC incredimod cannot hold 100 characters. Today 100-character play works only by running an APK mod's own engine in the separate ModLoader window (`ApkMods/`, F10, §3.0.1). That engine is third-party code taken from each APK.
-  - **Routes to decide:** (a) Write the extracted/converted characters into an existing 100-character APK engine's `asset-v*` layout (reuses what already runs, but needs a host APK the user owns). (b) Patch the PC engine at runtime from `modloader/renderer.js` so that picto count, picto layout (reuse `layoutApkPictos`) and polo count are parameters (no third-party engine, but deeper reverse engineering of the obfuscated `script.min.js`). (c) A ModLoader-owned minimal player. Investigate (b) first. The anime JSON, picto and sound formats are already known (§3.0.2), and `sb3-to-incredimod` already produces per-character sheets and A/B loops.
-  - **Reuse:** `import-apk.js` / `unpack-apk-mod.js` (APK side), `convert.js` + `autoconfig.js` (sb3 side), the PC layout constants in `build-art.js` (`GAME`), and the `ApkMods` partition/save isolation for anything that runs its own storage.
-  - **Open questions for the user:** what a 100-character mod looks like (5 groups of 20? several sb3s merged?), how many polos (10 = APK layout), and whether the result must also work in the plain PC window or only through the ModLoader.
+- **Completed (2026-11-19):** 100-icon / 10-polo native PC engine patch (Route b) + multi-mod builder (`scripts/build-100p-mod.js`) + `5-Mod Mashup 100p` (`9027675`) verified in game.
+- **Optional follow-ups:** rebuild the single-exe installer (`scripts/build-installer.ps1`) to bundle the updated `modloader/main.js` & `renderer.js`, or add a GUI/CLI preset generator for `build-100p-mod.js` configs.

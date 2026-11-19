@@ -498,5 +498,83 @@ if (!app.commandLine.hasSwitch('arg')) {
   app.commandLine.appendSwitch('arg', 'arp');
 }
 
+// ---------------------------------------------------------------------------
+// PC Engine Patch: unlock >20 icons and configurable nbpolo in script.min.js
+//
+// PC v1.2.9 script.min.js already uses dynamic variables lQ (icon count) and
+// pQ (polo count) in every game loop, with only 5 hardcoded constants/hooks.
+// Patching once (with a .orig backup and version marker) lets any PC
+// incredimod with >20 characters or nbpolo != 7 run natively in the PC window.
+// ---------------------------------------------------------------------------
+const PC_ENGINE_PATCH_MARKER = '/*INCREDIBOX_MODLOADER_100P_V3*/';
+
+function ensurePcEnginePatched() {
+  const scriptPath = path.join(PC_SRC_DIR, 'js', 'script.min.js');
+  if (!fs.existsSync(scriptPath)) return;
+
+  try {
+    const current = fs.readFileSync(scriptPath, 'utf8');
+    if (current.includes(PC_ENGINE_PATCH_MARKER)) return;
+
+    const origPath = scriptPath + '.orig';
+    let raw;
+    if (fs.existsSync(origPath)) {
+      raw = fs.readFileSync(origPath, 'utf8');
+    } else {
+      raw = current;
+      fs.writeFileSync(origPath, raw, 'utf8');
+    }
+
+    const patches = [
+      {
+        name: 'unlock-icon-cap',
+        re: /lQ=\(lQ=px\['\\x61\\x6e\\x69\\x6d\\x65\\x61\\x72\\x72\\x61\\x79'\]\[([^\]]+)\]\)\>0x14\?0x14:lQ/g,
+        rep: "lQ=(lQ=px['\\x61\\x6e\\x69\\x6d\\x65\\x61\\x72\\x72\\x61\\x79'][$1])",
+      },
+      {
+        name: 'dynamic-nbpolo-and-recmaxloop',
+        re: /\bpQ=0x7\b/g,
+        rep: 'pQ=(px&&(px.recmaxloop=Math.max(999,Math.ceil(9999000/(px.looptime||8000))),px.recminloop=px.recminloop||2,px.recmintime=px.recmintime||Math.round((px.looptime||8000)/1000)*px.recminloop),px&&px.nbpolo>0?px.nbpolo:0x7)',
+      },
+      {
+        name: 'polo-width-6.8',
+        re: /\baq=6\.8\b/g,
+        rep: 'aq=(pQ>7?pQ-0.2:6.8),ak*=(aq/6.8)',
+      },
+      {
+        name: 'polo-width-6.3',
+        re: /\baq=6\.3\b/g,
+        rep: 'aq=(pQ>7?pQ-0.5:6.3),ak*=(aq/6.3)',
+      },
+      {
+        name: 'resize-picto-hook',
+        re: /\bpoloBlocGapX=av\/0x2,/g,
+        rep: '(window.__mlLayoutPcPictos&&window.__mlLayoutPcPictos(lQ,pQ)),poloBlocGapX=av/0x2,',
+      },
+    ];
+
+    let patched = raw;
+    for (const p of patches) {
+      const matches = patched.match(p.re);
+      if (!matches || matches.length !== 1) {
+        logger.warn(
+          `[EnginePatch] Skipping script.min.js patch: "${p.name}" matched ${matches ? matches.length : 0} time(s) (expected 1).`
+        );
+        return;
+      }
+      patched = patched.replace(p.re, p.rep);
+    }
+
+    const tmpPath = scriptPath + '.tmp';
+    fs.writeFileSync(tmpPath, PC_ENGINE_PATCH_MARKER + '\n' + patched, 'utf8');
+    fs.renameSync(tmpPath, scriptPath);
+    logger.info('[EnginePatch] Patched script.min.js for >20 icons and configurable nbpolo.');
+  } catch (err) {
+    logger.error(`[EnginePatch] Failed to patch script.min.js: ${err.message}`);
+  }
+}
+
+ensurePcEnginePatched();
+
 // Hand off execution to the original Incredibox main script
 require('../src/elec-index.js');

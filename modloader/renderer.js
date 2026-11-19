@@ -162,6 +162,118 @@
       return true;
     }
     if (!patchReplaySeek()) window.addEventListener('load', patchReplaySeek, { once: true });
+  } else {
+    // PC mode: multi-row 20-column picto grid for >20-character mods (e.g. 100 chars = 5x20).
+    // Standard <=20-character mods are left untouched.
+    if (!document.getElementById('incredibox-modloader-100p-css')) {
+      const style = document.createElement('style');
+      style.id = 'incredibox-modloader-100p-css';
+      style.textContent = `
+        html.ml-100p-mode {
+          --box-top-height-int: 10 !important;
+          --box-bottom-height-int: 50 !important;
+          --box-top-height-pct: 10% !important;
+          --box-bottom-height-pct: 50% !important;
+        }
+        #box-bottom #box-picto.ml-grid-picto {
+          top: 50% !important;
+          transform: translateY(-50%);
+          width: auto !important;
+        }
+        #box-bottom #box-picto.ml-grid-picto .pictoline {
+          margin: 0 !important;
+          justify-content: center;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    window.__mlLayoutPcPictos = function () {
+      const pictoBox = document.getElementById('box-picto');
+      const boxBottom = document.getElementById('box-bottom');
+      if (!pictoBox || !boxBottom) return;
+
+      const pictos = Array.from(pictoBox.querySelectorAll('.picto')).sort(
+        (a, b) => (parseInt(a.dataset.pictoNum, 10) || 0) - (parseInt(b.dataset.pictoNum, 10) || 0)
+      );
+
+      if (pictos.length <= 20) {
+        const hadMode = document.documentElement.classList.contains('ml-100p-mode');
+        document.documentElement.classList.remove('ml-100p-mode');
+        pictoBox.classList.remove('ml-grid-picto');
+        pictoBox.querySelectorAll('.pictoline.ml-extra').forEach((el) => el.remove());
+        if (hadMode) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+        return;
+      }
+
+      const wasMode = document.documentElement.classList.contains('ml-100p-mode');
+      document.documentElement.classList.add('ml-100p-mode');
+      pictoBox.classList.add('ml-grid-picto');
+      if (!wasMode) {
+        requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+      }
+      const cols = 20;
+      const rows = Math.ceil(pictos.length / cols);
+
+      const topLine = pictoBox.querySelector('.pictoline.top');
+      const botLine = pictoBox.querySelector('.pictoline.bot');
+      if (!topLine || !botLine) return;
+
+      const lines = [topLine, botLine];
+      const existingExtras = Array.from(pictoBox.querySelectorAll('.pictoline.ml-extra'));
+      for (let r = 2; r < rows; r++) {
+        let line = existingExtras[r - 2];
+        if (!line) {
+          line = document.createElement('div');
+          line.className = 'pictoline ml-extra';
+          pictoBox.appendChild(line);
+        }
+        lines.push(line);
+      }
+      for (let i = Math.max(0, rows - 2); i < existingExtras.length; i++) {
+        existingExtras[i].remove();
+      }
+
+      pictos.forEach((el, idx) => {
+        const row = Math.floor(idx / cols);
+        const target = lines[row];
+        if (target && el.parentNode !== target) {
+          target.appendChild(el);
+        }
+      });
+
+      const availW = Math.max(320, boxBottom.clientWidth - 24);
+      const availH = Math.max(120, boxBottom.clientHeight - 12);
+      const gap = Math.max(2, Math.min(6, Math.floor(availH * 0.015)));
+      const groupGap = gap * 2 + 4;
+      const sizeByH = Math.floor((availH - (rows - 1) * gap) / rows);
+      const sizeByW = Math.floor((availW - (cols - 1) * gap - 3 * groupGap) / cols);
+      const iconSize = Math.max(22, Math.min(68, sizeByH, sizeByW));
+
+      lines.forEach((line, r) => {
+        line.style.marginBottom = r < rows - 1 ? `${gap}px` : '0px';
+      });
+
+      pictos.forEach((el, idx) => {
+        const col = idx % cols;
+        el.style.width = `${iconSize}px`;
+        el.style.height = `${iconSize}px`;
+        el.style.margin = '0px';
+        const isRowEnd = col === cols - 1 || idx === pictos.length - 1;
+        if (isRowEnd) {
+          el.style.marginRight = '0px';
+        } else if (col === 4 || col === 9 || col === 14) {
+          el.style.marginRight = `${gap + groupGap}px`;
+        } else {
+          el.style.marginRight = `${gap}px`;
+        }
+      });
+    };
+
+    // In case renderer.js was injected after iB() already ran
+    if (document.querySelectorAll('#box-picto .picto').length > 20) {
+      window.__mlLayoutPcPictos();
+    }
   }
 
   // Inject CSS & JS for each discovered JS mod
