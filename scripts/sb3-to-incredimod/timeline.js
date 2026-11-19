@@ -4,7 +4,7 @@
 // Scratch timing model: 30 fps. "wait d" resumes at the first frame boundary >= now + d.
 // Non-warp repeat loops yield one frame per iteration. A loop's script is cut at loopSec.
 //
-// usage (module): simulate(project, { phase, loopSec, framesPerLoop }) -> [{ name, A, B, warnings }]
+// usage (module): simulate(project, { phase, loopSec, framesPerLoop, idles }) -> [{ name, A, B, warnings }]
 
 const FPS = 30;
 
@@ -283,7 +283,21 @@ function sample(events, startCostume, loopSec, framesPerLoop) {
   return out;
 }
 
-function simulate(project, { phase = '1', loopSec = 4.8, framesPerLoop = 116 } = {}) {
+// Idle (placed, not yet looping) costume: per-character override, then 'idle2' (phase 2) / 'idle',
+// then '0' (Interbox-style projects switch to "0" on "Start Polo"), then the first costume.
+function idleCostume(t, phase, override) {
+  const has = (n) => t.costumes.some((c) => c.name === n);
+  if (override) {
+    if (!has(override)) throw new Error(`${t.name}: idle costume ${override} missing`);
+    return override;
+  }
+  if (phase === '2' && has('idle2')) return 'idle2';
+  if (has('idle')) return 'idle';
+  if (has('0')) return '0';
+  return t.costumes[0].name;
+}
+
+function simulate(project, { phase = '1', loopSec = 4.8, framesPerLoop = 116, idles = [] } = {}) {
   const chars = project.targets.slice(1, 21);
   const stageVars = {};
   for (const v of Object.values(project.targets[0].variables || {})) stageVars[v[0]] = String(v[1]);
@@ -295,8 +309,8 @@ function simulate(project, { phase = '1', loopSec = 4.8, framesPerLoop = 116 } =
     MuteEnable: '1',
     Character: '1',
   };
-  return chars.map((t) => {
-    const idle = phase === '2' && t.costumes.some((c) => c.name === 'idle2') ? 'idle2' : 'idle';
+  return chars.map((t, i) => {
+    const idle = idleCostume(t, phase, idles[i]);
     const a = runLoop(t, 'Loop 1', { vars, loopSec }, idle);
     const b = runLoop(t, 'Loop 2', { vars, loopSec }, a.endCostume);
     return {

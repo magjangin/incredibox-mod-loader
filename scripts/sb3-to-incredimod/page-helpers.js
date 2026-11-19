@@ -30,17 +30,26 @@ window.H = {
     return maxX < 0 ? null : [minX, minY, maxX + 1, maxY + 1];
   },
   // Bounding box of a costume in stage units relative to its rotation center.
+  // The canvas only covers the drawn image (was a fixed 2400x2400 scan per costume). The integer
+  // part of the draw offset moves into ix/iy, so the fractional offset - and thus the rasterized
+  // alpha - is the same as drawing at (pad - rc*s) on the big canvas.
   async measure({ url, rcx, rcy, res, scale }) {
     const img = await H.load(url);
     const k = 2; // oversample
     const s = (scale / res) * k;
     const pad = 1200;
-    const c = H.canvas(pad * 2, pad * 2);
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, pad - rcx * s, pad - rcy * s, img.width * s, img.height * s);
+    const x0 = pad - rcx * s, y0 = pad - rcy * s;
+    const ix = Math.floor(x0), iy = Math.floor(y0);
+    const c = H.canvas(Math.ceil(img.width * s) + 2, Math.ceil(img.height * s) + 2);
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, x0 - ix, y0 - iy, img.width * s, img.height * s);
     const b = H.alphaBox(ctx, c.width, c.height);
     if (!b) return null;
-    return b.map((v) => (v - pad) / k);
+    return [b[0] + ix, b[1] + iy, b[2] + ix, b[3] + iy].map((v) => (v - pad) / k);
+  },
+  // Measure several costumes in one round trip (images decode in parallel).
+  async measureAll(specs) {
+    return Promise.all(specs.map((s) => H.measure(s)));
   },
   // Draw a costume into ctx so its rotation center lands at (ax, ay); px = LD/HD pixels per stage unit.
   async drawCostume(ctx, { url, rcx, rcy, res, scale }, ax, ay, px) {

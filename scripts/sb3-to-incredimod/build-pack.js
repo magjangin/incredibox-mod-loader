@@ -1,15 +1,31 @@
 // Pack out/phase<N>/ into an Incredibox PC incredimod (<versionId>.json) and register it in localmods.json.
-// usage: node build-pack.js --work <dir> [--config <file>] [--phase 1] [--install]
+// usage: node build-pack.js --work <dir> [--config <file>] [--phase 1] [--install [--force]]
 const fs = require('fs');
 const path = require('path');
 const { stableVersionId, findModdedDir } = require('../lib/common');
-const { getOptions } = require('./lib');
+const { getOptions, gameRunning } = require('./lib');
 
 const opts = getOptions();
 const { config, phase, install } = opts;
 const P = config.phases[phase];
 const DIR = path.join(opts.out, `phase${phase}`);
 const MODS_DIR = path.join(process.env.APPDATA, 'Incredibox', 'incredimods');
+const KEEP_BACKUPS = 5;
+
+// Keep only the newest KEEP_BACKUPS localmods.json.bak-<time> files.
+function pruneBackups() {
+  const baks = fs
+    .readdirSync(MODS_DIR)
+    .filter((f) => /^localmods\.json\.bak-\d+$/.test(f))
+    .sort((a, b) => Number(b.split('-').pop()) - Number(a.split('-').pop()));
+  for (const f of baks.slice(KEEP_BACKUPS)) fs.rmSync(path.join(MODS_DIR, f));
+  return Math.max(0, baks.length - KEEP_BACKUPS);
+}
+
+if (install && gameRunning() && !process.argv.includes('--force')) {
+  console.error('Incredibox is running. Close the game before --install (it would overwrite localmods.json), or pass --force.');
+  process.exit(2);
+}
 
 // Directory with the game's own polo-sprite.png (fallback empty-slot beatboxer).
 function gameImgDir() {
@@ -58,7 +74,10 @@ const appJson = {
   bonusarray: [],
   credit: {
     crewname: config.author,
-    process: [`Original Scratch project by ${config.author} (Cocrea)`, 'Converted with Incredibox ModLoader sb3 converter'],
+    process: [
+      `Original Scratch project by ${config.author} (${config.platform || 'Cocrea'})`,
+      'Converted with Incredibox ModLoader sb3 converter',
+    ],
     thanks: config.source,
   },
   format: ['ld', 'hd', 'ogg'],
@@ -96,5 +115,8 @@ if (install) {
   else local.push(entry);
   fs.copyFileSync(outFile, path.join(MODS_DIR, `${versionId}.json`));
   fs.writeFileSync(localPath, JSON.stringify(local), 'utf8');
-  console.log(`installed -> ${path.join(MODS_DIR, `${versionId}.json`)} (localmods: ${local.length} entries)`);
+  const pruned = pruneBackups();
+  console.log(
+    `installed -> ${path.join(MODS_DIR, `${versionId}.json`)} (localmods: ${local.length} entries${pruned ? `, ${pruned} old backups removed` : ''})`
+  );
 }

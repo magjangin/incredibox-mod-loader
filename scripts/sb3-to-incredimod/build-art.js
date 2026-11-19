@@ -15,6 +15,13 @@ const OUT = path.join(opts.out, `phase${phase}`);
 const CELL_W = 164; // LD units (HD = x2)
 const CELL_H = 380;
 const COLS = 10;
+// In-game layout (v1.2.9 script.min.js, `iy.canvas` / `iy.polo`, LD px): canvas 1100x430, polo
+// drawn width iv = W/6.8 (scale iq = iv/164), slot spacing ix = (W - iv - marge/2)/6, a character
+// sheet's top is at H - 380*iq + random(0..30)*iq, so its bottom sits on the canvas bottom.
+const GAME = (() => {
+  const W = 1100, Hc = 430, iv = W / 6.8, iq = iv / 164;
+  return { W, H: Hc, iq, slot: (W - iv - 200 / 2) / 6, sheetTop: Hc - CELL_H * iq + 15 * iq };
+})();
 
 function costumeSpec(target, name) {
   const c = target.costumes.find((x) => x.name === name);
@@ -37,7 +44,12 @@ function writeDataUrl(file, dataUrl) {
 }
 
 (async () => {
-  const sim = simulate(project, { phase, loopSec: P.loopSec, framesPerLoop: P.framesPerLoop });
+  const sim = simulate(project, {
+    phase,
+    loopSec: P.loopSec,
+    framesPerLoop: P.framesPerLoop,
+    idles: config.characters.map((c) => c.idle),
+  });
   const chars = project.targets.slice(1, 21);
   const browser = await launch({ profileDir: opts.profileDir });
   try {
@@ -50,8 +62,10 @@ function writeDataUrl(file, dataUrl) {
       const specs = used.map((n) => costumeSpec(t, n));
       let box = null;
       let idleBox = null;
-      for (const spec of specs) {
-        const b = await browser.evaluate(`H.measure(${JSON.stringify(spec)})`);
+      const boxes = await browser.evaluate(`H.measureAll(${JSON.stringify(specs)})`);
+      for (let j = 0; j < specs.length; j++) {
+        const spec = specs[j];
+        const b = boxes[j];
         if (!b) continue;
         if (spec.name === s.idle) idleBox = b;
         box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b;
@@ -67,16 +81,28 @@ function writeDataUrl(file, dataUrl) {
     const mode = (config.framing && config.framing.mode) || 'full';
     const upper = mode === 'upper';
     const scratch = mode === 'scratch';
-    const k = scratch ? config.framing.k : upper ? kFull * config.framing.scale : kFull;
+    // scratch + slotUnits: same character size relative to the slot spacing as in the original
+    // (the game spaces slots GAME.slot px apart but draws sheets at GAME.iq)
+    const kScratch = scratch && config.framing.slotUnits ? GAME.slot / config.framing.slotUnits / GAME.iq : null;
+    const k = scratch ? kScratch || config.framing.k : upper ? kFull * config.framing.scale : kFull;
     // full: common ground line; upper: idle head top at framing.headTop (+ headroom, max 36 LD px,
     // for poses that rise above the idle head); scratch: fixed rotation-center line like the original
     const headroom = (p) => Math.min(36, Math.max(0, (p.idleBox[1] - p.box[1]) * k));
-    const anchorY = (p) =>
+    const baseY = (p) =>
       scratch
         ? config.framing.charY
         : upper
           ? config.framing.headTop + headroom(p) - k * p.idleBox[1]
           : CELL_H - 2 - k * maxY;
+    // characters[i].dy (LD px, + = down) nudges one character, e.g. a tall hood clipped at the top;
+    // framing.fitTop computes it for characters without dy so the union box starts at y >= 2
+    const dyOf = (p) => {
+      const dy = config.characters[p.index].dy;
+      if (dy !== undefined) return dy;
+      if (!config.framing || !config.framing.fitTop) return 0;
+      return Math.max(0, Math.ceil(2 - (baseY(p) + k * p.box[1])));
+    };
+    const anchorY = (p) => dyOf(p) + baseY(p);
     const ay = anchorY(plan[0]);
     console.log(`framing ${mode}: k=${k.toFixed(3)} LD px/stage unit (full-body k ${kFull.toFixed(3)})`);
     for (let i = 0; i < plan.length; i++) {
@@ -85,7 +111,7 @@ function writeDataUrl(file, dataUrl) {
       const h = (p.box[3] - p.box[1]) * k;
       const top = anchorY(p) + k * p.box[1];
       console.log(
-        `${String(i + 1).padStart(2)} ${p.target.name.padEnd(18)} fit ${fits[i].toFixed(3)} -> ${w.toFixed(0)}x${h.toFixed(0)} LD, top ${top.toFixed(0)}${w > CELL_W || top < 0 ? '  (CLIPPED)' : ''} | costumes ${p.used.length}`
+        `${String(i + 1).padStart(2)} ${p.target.name.padEnd(18)} fit ${fits[i].toFixed(3)} -> ${w.toFixed(0)}x${h.toFixed(0)} LD, top ${top.toFixed(0)}${w > CELL_W || top < 0 ? '  (CLIPPED)' : ''} | costumes ${p.used.length}${config.characters[i].dy === undefined && dyOf(p) ? ` | fitTop dy ${dyOf(p)}` : ''}`
       );
     }
     if (measureOnly) return;
@@ -198,13 +224,31 @@ function writeDataUrl(file, dataUrl) {
     // 4) backgrounds / cover
     const stage = project.targets[0];
     const preview = project.targets.find((t) => t.name === 'Preview');
-    const bg = costumeSpec(stage, P.backdrop).url;
-    const cover = costumeSpec(preview, config.coverCostume).url;
+    const bgSpec = costumeSpec(stage, P.backdrop);
+    const bg = bgSpec.url;
+    // no Preview sprite / cover costume: the cover screens use the backdrop
+    const cover = preview && config.coverCostume ? costumeSpec(preview, config.coverCostume).url : bg;
+    // background.mode 'stage': draw the backdrop in the characters' coordinate system, so stage
+    // point (0, slotY) - the slot rotation centers - lands where the game draws charY. Otherwise
+    // the backdrop image covers the frame.
+    let stageBg = null;
+    if (config.background && config.background.mode === 'stage' && scratch) {
+      const hdPerCanvas = 2048 / GAME.W;
+      const unit = k * GAME.iq; // canvas px per stage unit
+      const centerY = GAME.sheetTop + config.framing.charY * GAME.iq + config.background.slotY * unit;
+      stageBg = { x: 1024, y: centerY * hdPerCanvas, px: unit * hdPerCanvas, fill: config.background.fill || '#000000' };
+      console.log(`background: stage-aligned, ${stageBg.px.toFixed(3)} HD px/unit, stage (0,0) at y ${stageBg.y.toFixed(0)}`);
+    }
     const imgs = await browser.evaluate(`(async () => {
       const bg = ${JSON.stringify(bg)}, cover = ${JSON.stringify(cover)};
+      const bgSpec = ${JSON.stringify(bgSpec)}, stageBg = ${JSON.stringify(stageBg)};
       const jpg = async (w, h, withCover) => {
         const c = H.canvas(w, h), ctx = c.getContext('2d');
-        await H.drawCover(ctx, bg, w, h);
+        if (stageBg && !withCover) {
+          ctx.fillStyle = stageBg.fill;
+          ctx.fillRect(0, 0, w, h);
+          await H.drawCostume(ctx, bgSpec, stageBg.x * w / 2048, stageBg.y * w / 2048, stageBg.px * w / 2048);
+        } else await H.drawCover(ctx, bg, w, h);
         if (withCover) await H.drawFit(ctx, cover, 0, 0, w, h, Math.round(h * 0.04));
         return c.toDataURL('image/jpeg', 0.9);
       };
