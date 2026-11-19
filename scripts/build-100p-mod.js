@@ -10,70 +10,50 @@
  * game-picto.png strip.
  *
  * Usage:
- *   node scripts/build-100p-mod.js <config.json> [--install] [--force]
+ *   node scripts/build-100p-mod.js <config.json> [--install] [--force] [--keep-tmp]
+ *
+ * Needs ffmpeg (with libvorbis) and Python 3 + Pillow on PATH. Config fields are
+ * documented in scripts/build-100p-mod.example.json and AGENTS.md section 3.0.4.
+ * The output pack needs the ModLoader engine patch (modloader/engine-patch.js)
+ * to show more than 20 icons / 7 polos.
  */
 
 const fs = require('fs');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
-const { stableVersionId, parseAppJs } = require('./lib/common');
+const {
+  stableVersionId,
+  parseAppJs,
+  toDataURL,
+  fromDataURL,
+  normalizeColor,
+  isGameRunning,
+  installIncredimod,
+} = require('./lib/common');
+const { extractAsar } = require('./extract-asar');
 
 const AUDIO_CONCURRENCY = 8;
+const CHARS_PER_SOURCE = 20;
 
-function toDataURL(buf, mime = 'application/octet-stream') {
-  return `data:${mime};base64,${buf.toString('base64')}`;
-}
-
-function fromDataURL(url) {
-  const idx = url.indexOf(',');
-  if (idx === -1) throw new Error('Invalid dataURL');
-  return Buffer.from(url.slice(idx + 1), 'base64');
-}
-
-function normalizeColor(c, fallback = '#777777') {
-  if (!c || typeof c !== 'string') return fallback;
-  const trimmed = c.trim();
-  return trimmed.startsWith('#') ? trimmed : '#' + trimmed;
-}
-
-function isIncrediboxRunning() {
+// Fail early with a readable message instead of halfway through a build.
+function checkTools() {
+  const missing = [];
   try {
-    const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq Incredibox*', '/NH'], {
-      encoding: 'utf8',
-    });
-    return /Incredibox/i.test(out);
+    execFileSync('ffmpeg', ['-hide_banner', '-version'], { stdio: 'ignore' });
   } catch (_) {
-    return false;
+    missing.push('ffmpeg (with libvorbis) on PATH');
   }
+  try {
+    execFileSync('python', ['-c', 'import PIL'], { stdio: 'ignore' });
+  } catch (_) {
+    missing.push('Python 3 with Pillow on PATH (pip install pillow)');
+  }
+  if (missing.length) throw new Error(`Missing tools: ${missing.join('; ')}`);
 }
 
-function extractAsarDir(asarPath, relDir, outDir) {
-  const buf = fs.readFileSync(asarPath);
-  const headerSize = buf.readUInt32LE(4);
-  const jsonSize = buf.readUInt32LE(12);
-  const dataStart = 8 + headerSize;
-  const header = JSON.parse(buf.subarray(16, 16 + jsonSize).toString('utf8'));
-
-  let node = header;
-  for (const part of relDir.split('/').filter(Boolean)) {
-    if (!node.files || !node.files[part]) {
-      throw new Error(`ASAR path not found: ${relDir}`);
-    }
-    node = node.files[part];
-  }
-
-  function walk(cur, dst) {
-    if (cur.files) {
-      fs.mkdirSync(dst, { recursive: true });
-      for (const [k, v] of Object.entries(cur.files)) {
-        walk(v, path.join(dst, k));
-      }
-    } else if (cur.offset !== undefined) {
-      const start = dataStart + Number(cur.offset);
-      fs.writeFileSync(dst, buf.subarray(start, start + cur.size));
-    }
-  }
-  walk(node, outDir);
+// Buffer of a pack entry, or null.
+function packBuf(pack, key) {
+  return pack[key] ? fromDataURL(pack[key].dataURL) : null;
 }
 
 /**
@@ -86,30 +66,29 @@ function extractAsarDir(asarPath, relDir, outDir) {
  */
 function loadSource(srcCfg, workDir) {
   if (srcCfg.type === 'incredimod') {
-    const jsonPath = srcCfg.path;
-    const pack = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-    const appJson = JSON.parse(fromDataURL(pack['app.json'].dataURL).toString('utf8'));
+    const pack = JSON.parse(fs.readFileSync(srcCfg.path, 'utf8'));
+    const appBuf = packBuf(pack, 'app.json');
+    if (!appBuf) throw new Error(`${srcCfg.path}: not an incredimod pack (no app.json)`);
+    const appJson = JSON.parse(appBuf.toString('utf8'));
+    const findSnd = (n, suffix) => {
+      for (const ext of ['ogg', 'mp3']) {
+        const buf = packBuf(pack, `sound/${ext}/${n}_${suffix}.${ext}`);
+        if (buf) return { ext, buf };
+      }
+      return null;
+    };
     const characters = appJson.animearray.map((a) => {
       const n = a.name;
-      const jBuf = fromDataURL(pack[`anime/${n}.json`].dataURL);
+      const jBuf = packBuf(pack, `anime/${n}.json`);
+      if (!jBuf) throw new Error(`${srcCfg.path}: anime/${n}.json missing`);
       const j = JSON.parse(jBuf.toString('utf8'));
-      const spriteHd = pack[`anime/${n}.png`] ? fromDataURL(pack[`anime/${n}.png`].dataURL) : null;
-      const spriteLd = pack[`anime/${n}-ld.png`] ? fromDataURL(pack[`anime/${n}-ld.png`].dataURL) : null;
-      const soundA = pack[`sound/ogg/${n}_a.ogg`]
-        ? { ext: 'ogg', buf: fromDataURL(pack[`sound/ogg/${n}_a.ogg`].dataURL) }
-        : pack[`sound/mp3/${n}_a.mp3`]
-          ? { ext: 'mp3', buf: fromDataURL(pack[`sound/mp3/${n}_a.mp3`].dataURL) }
-          : null;
-      const soundB = !a.uniqsnd
-        ? pack[`sound/ogg/${n}_b.ogg`]
-          ? { ext: 'ogg', buf: fromDataURL(pack[`sound/ogg/${n}_b.ogg`].dataURL) }
-          : pack[`sound/mp3/${n}_b.mp3`]
-            ? { ext: 'mp3', buf: fromDataURL(pack[`sound/mp3/${n}_b.mp3`].dataURL) }
-            : null
-        : null;
+      const spriteHd = packBuf(pack, `anime/${n}.png`);
+      const spriteLd = packBuf(pack, `anime/${n}-ld.png`);
+      const soundA = findSnd(n, 'a');
+      const soundB = a.uniqsnd ? null : findSnd(n, 'b');
       return {
         name: n,
-        color: normalizeColor(a.color),
+        color: normalizeColor(a.color, '#777777'),
         uniqsnd: Boolean(a.uniqsnd),
         json: j,
         spriteHd: spriteHd || spriteLd,
@@ -126,15 +105,11 @@ function loadSource(srcCfg, workDir) {
       totalframe: Number(appJson.totalframe),
       doubleLoop: Boolean(srcCfg.doubleLoop),
       characters,
-      pictoBuf: pack['image/game-picto.png'] ? fromDataURL(pack['image/game-picto.png'].dataURL) : null,
-      bckBuf: pack['image/game-bck.jpg'] ? fromDataURL(pack['image/game-bck.jpg'].dataURL) : null,
-      coverBuf: pack['image/home-screen.jpg']
-        ? fromDataURL(pack['image/home-screen.jpg'].dataURL)
-        : pack['image/icon.jpg']
-          ? fromDataURL(pack['image/icon.jpg'].dataURL)
-          : null,
-      poloHdBuf: pack['anime/0_polo.png'] ? fromDataURL(pack['anime/0_polo.png'].dataURL) : null,
-      poloLdBuf: pack['anime/0_polo-ld.png'] ? fromDataURL(pack['anime/0_polo-ld.png'].dataURL) : null,
+      pictoBuf: packBuf(pack, 'image/game-picto.png'),
+      bckBuf: packBuf(pack, 'image/game-bck.jpg'),
+      coverBuf: packBuf(pack, 'image/home-screen.jpg') || packBuf(pack, 'image/icon.jpg'),
+      poloHdBuf: packBuf(pack, 'anime/0_polo.png'),
+      poloLdBuf: packBuf(pack, 'anime/0_polo-ld.png'),
     };
   }
 
@@ -148,15 +123,22 @@ function loadSource(srcCfg, workDir) {
       execFileSync('tar', ['-xf', srcCfg.path, '-C', extractBase, sub]);
     }
   } else if (srcCfg.type === 'asar-zip') {
+    // A zipped Electron build: asarEntry = path of app.asar inside the zip,
+    // asarDir = the asset-v* folder inside that asar.
     const extractBase = path.join(workDir, 'extracted', srcCfg.id);
     assetDir = path.join(extractBase, 'asset');
     if (!fs.existsSync(path.join(assetDir, 'app.js'))) {
       fs.mkdirSync(extractBase, { recursive: true });
       execFileSync('tar', ['-xf', srcCfg.path, '-C', extractBase, srcCfg.asarEntry]);
       const asarAbs = path.join(extractBase, srcCfg.asarEntry);
-      extractAsarDir(asarAbs, srcCfg.asarDir, assetDir);
+      extractAsar(asarAbs, assetDir, srcCfg.asarDir);
       fs.rmSync(asarAbs, { force: true });
     }
+  } else if (srcCfg.type !== 'dir') {
+    throw new Error(`Unknown source type "${srcCfg.type}" (incredimod | apk | asar-zip | dir)`);
+  }
+  if (!assetDir || !fs.existsSync(path.join(assetDir, 'app.js'))) {
+    throw new Error(`${srcCfg.id || srcCfg.label}: app.js not found in ${assetDir}`);
   }
 
   const rawApp = parseAppJs(path.join(assetDir, 'app.js'));
@@ -184,7 +166,7 @@ function loadSource(srcCfg, workDir) {
 
     return {
       name: n,
-      color: normalizeColor(a.color),
+      color: normalizeColor(a.color, '#777777'),
       uniqsnd: Boolean(a.uniqsnd),
       json: j,
       spriteHd,
@@ -386,7 +368,7 @@ function normalizeAndResampleAnimeJson(
   return j;
 }
 
-function stitchImagesWithPython({ pictoPaths, coverPaths, outPicto, outCover, outIcon, iconSize, title }) {
+function stitchImagesWithPython({ pictoPaths, coverPaths, outPicto, outCover, outIcon, iconSize }) {
   const pyCode = `
 import sys, json
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -447,7 +429,7 @@ print(f"Stitched {total} icons ({out_im.size[0]}x{out_im.size[1]}) + cover ({W}x
     [
       '-c',
       pyCode,
-      JSON.stringify({ pictoPaths, coverPaths, outPicto, outCover, outIcon, iconSize, title }),
+      JSON.stringify({ pictoPaths, coverPaths, outPicto, outCover, outIcon, iconSize }),
     ],
     { stdio: 'inherit' }
   );
@@ -458,18 +440,23 @@ async function main() {
   const configPath = args.find((a) => !a.startsWith('--'));
   const doInstall = args.includes('--install');
   const force = args.includes('--force');
+  const keepTmp = args.includes('--keep-tmp');
 
   if (!configPath) {
-    console.error('Usage: node scripts/build-100p-mod.js <config.json> [--install] [--force]');
+    console.error('Usage: node scripts/build-100p-mod.js <config.json> [--install] [--force] [--keep-tmp]');
     process.exit(1);
   }
 
-  if (doInstall && !force && isIncrediboxRunning()) {
+  if (doInstall && !force && isGameRunning()) {
     console.error('ERROR: Incredibox is currently running. Close the game before --install (or pass --force).');
     process.exit(1);
   }
 
   const cfg = JSON.parse(fs.readFileSync(path.resolve(configPath), 'utf8'));
+  if (!cfg.name || !cfg.workDir || !Array.isArray(cfg.sources) || cfg.sources.length === 0) {
+    throw new Error('config needs "name", "workDir" and a non-empty "sources" array');
+  }
+  checkTools();
   const workDir = path.resolve(cfg.workDir);
   const tmpDir = path.join(workDir, 'tmp');
   const outDir = path.join(workDir, 'out');
@@ -478,15 +465,13 @@ async function main() {
 
   const masterBpm = Number(cfg.bpm || 120);
   const masterLooptime = Number(cfg.looptime || 8000);
-  const masterTotalFrame = Number(cfg.totalframe || 384);
-  const masterLoopFrames = masterTotalFrame / 2;
   const masterLoopSec = masterLooptime / 1000;
   const nbpolo = Number(cfg.nbpolo || 10);
-  const useLd = cfg.spriteQuality ? cfg.spriteQuality === 'ld' : cfg.sources.length * 20 > 40;
+  const useLd = cfg.spriteQuality ? cfg.spriteQuality === 'ld' : cfg.sources.length * CHARS_PER_SOURCE > 40;
   const iconSize = Number(cfg.iconSize || (useLd ? 68 : 112));
 
   console.log(
-    `Building "${cfg.name}" (${cfg.sources.length} sources -> ${cfg.sources.length * 20} chars, ${nbpolo} polos, ${masterBpm} BPM, ${masterLooptime}ms, ${useLd ? 'LD' : 'HD'})...`
+    `Building "${cfg.name}" (${cfg.sources.length} sources -> ${cfg.sources.length * CHARS_PER_SOURCE} chars, ${nbpolo} polos, ${masterBpm} BPM, ${masterLooptime}ms, ${useLd ? 'LD' : 'HD'})...`
   );
 
   // 1. Load all sources
@@ -500,9 +485,14 @@ async function main() {
     console.log(
       `  [${sIdx + 1}/${cfg.sources.length}] ${src.label}: ${src.characters.length} chars, ${src.bpm} BPM, ${src.looptime}ms${src.doubleLoop ? ' (2x loop)' : ''}`
     );
-    if (src.characters.length !== 20) {
-      throw new Error(`Expected 20 characters in ${src.label}, got ${src.characters.length}`);
+    if (src.characters.length !== CHARS_PER_SOURCE) {
+      throw new Error(`Expected ${CHARS_PER_SOURCE} characters in ${src.label}, got ${src.characters.length}`);
     }
+    for (const ch of src.characters) {
+      if (!ch.soundA) throw new Error(`${src.label}: no sound for ${ch.name}_a`);
+      if (!ch.spriteHd && !ch.spriteLd) throw new Error(`${src.label}: no sprite sheet for ${ch.name}`);
+    }
+    if (!src.pictoBuf) throw new Error(`${src.label}: no game-picto image`);
     const pictoFile = path.join(tmpDir, `picto_${sIdx}.png`);
     fs.writeFileSync(pictoFile, src.pictoBuf);
     pictoPaths.push(pictoFile);
@@ -515,6 +505,12 @@ async function main() {
     loaded.push(src);
   }
 
+  // Master frames: config "totalframe", else enough for the source with the most
+  // frames per master loop, so no source drops frames (5-Mod Mashup: 2 x 244 = 488).
+  const autoHalf = Math.max(...loaded.map((s) => (s.doubleLoop ? s.totalframe : Math.ceil(s.totalframe / 2))));
+  const masterTotalFrame = Number(cfg.totalframe || autoHalf * 2);
+  console.log(`Master totalframe ${masterTotalFrame}${cfg.totalframe ? '' : ' (auto)'}; the largest source needs ${autoHalf * 2}.`);
+
   // 2. Stitch picto strip + mashup cover
   const outPicto = path.join(outDir, 'game-picto.png');
   const outCover = path.join(outDir, 'home-screen.jpg');
@@ -526,7 +522,6 @@ async function main() {
     outCover,
     outIcon,
     iconSize,
-    title: cfg.name,
   });
 
   // 3. Prepare audio stretch jobs + pack anime assets
@@ -614,8 +609,11 @@ async function main() {
   console.log(`Audio done in ${((Date.now() - t0) / 1000).toFixed(1)}s.`);
 
   // 4. Shared visuals (0_polo, game-bck, game-picto, cover/icon)
-  const bckSource = loaded[cfg.backgroundSourceIndex ?? loaded.length - 1] || loaded[0];
-  const poloSource = loaded.find((s) => (useLd ? s.poloLdBuf : s.poloHdBuf)) || loaded[0];
+  const bckSource =
+    loaded[cfg.backgroundSourceIndex ?? loaded.length - 1] || loaded.find((s) => s.bckBuf) || loaded[0];
+  const poloSource = loaded.find((s) => (useLd ? s.poloLdBuf : s.poloHdBuf));
+  if (!bckSource.bckBuf) throw new Error(`${bckSource.label}: no game-bck image (set backgroundSourceIndex)`);
+  if (!poloSource) throw new Error(`No source has an empty-slot polo sprite (${useLd ? 'LD' : 'HD'})`);
 
   if (useLd) {
     pack['anime/0_polo-ld.png'] = { dataURL: toDataURL(poloSource.poloLdBuf) };
@@ -668,46 +666,27 @@ async function main() {
   );
 
   if (doInstall) {
-    const userDataModsDir = path.join(process.env.APPDATA, 'Incredibox', 'incredimods');
-    fs.mkdirSync(userDataModsDir, { recursive: true });
-    const destPack = path.join(userDataModsDir, `${versionId}.json`);
-    fs.copyFileSync(packOut, destPack);
-
-    const localModsPath = path.join(userDataModsDir, 'localmods.json');
-    let localMods = [];
-    if (fs.existsSync(localModsPath)) {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      fs.copyFileSync(localModsPath, `${localModsPath}.bak-${stamp}`);
-      // Keep newest 5 backups
-      const baks = fs
-        .readdirSync(userDataModsDir)
-        .filter((f) => f.startsWith('localmods.json.bak-'))
-        .sort();
-      while (baks.length > 5) {
-        fs.rmSync(path.join(userDataModsDir, baks.shift()), { force: true });
-      }
-      localMods = JSON.parse(fs.readFileSync(localModsPath, 'utf8'));
-    }
-
-    const entry = {
-      version: versionId,
-      name: cfg.name,
-      crew: cfg.crew || 'Mashup 100p',
-      modders: cfg.modders || ['Mashup 100p'],
-      date: modDate,
-      icon: iconDataURL,
-      format: formats,
-      size: packBytes,
-      modio: false,
-    };
-
-    const existingIdx = localMods.findIndex((m) => m.version === versionId);
-    if (existingIdx !== -1) localMods[existingIdx] = entry;
-    else localMods.push(entry);
-
-    fs.writeFileSync(localModsPath, JSON.stringify(localMods), 'utf8');
-    console.log(`Installed "${cfg.name}" (version=${versionId}) into ${userDataModsDir}`);
+    const { dest, count, pruned } = installIncredimod({
+      packFile: packOut,
+      entry: {
+        version: versionId,
+        name: cfg.name,
+        crew: cfg.crew || 'Mashup 100p',
+        modders: cfg.modders || ['Mashup 100p'],
+        date: modDate,
+        icon: iconDataURL,
+        format: formats,
+        size: packBytes,
+        modio: false,
+      },
+    });
+    console.log(
+      `Installed "${cfg.name}" (version=${versionId}) -> ${dest} (localmods: ${count} entries${pruned ? `, ${pruned} old backups removed` : ''})`
+    );
   }
+
+  // Decoded pictos, covers and audio are only needed while building.
+  if (!keepTmp) fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 
 main().catch((err) => {

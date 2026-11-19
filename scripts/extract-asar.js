@@ -1,9 +1,21 @@
 'use strict';
 
+// Zero-dependency ASAR extractor (used by setup-game.ps1 and build-100p-mod.js).
+//   node extract-asar.js <app.asar> <destDir> [subDir]
+// subDir (e.g. "app/asset-v1") extracts only that folder, written directly into destDir.
+
 const fs = require('fs');
 const path = require('path');
 
-function extractAsar(asarPath, destDir) {
+// ASAR entry names come from the archive (possibly third-party): refuse anything
+// that could escape destDir.
+function checkEntryName(name) {
+  if (!name || name === '.' || name === '..' || /[\\/:*?"<>|\x00-\x1f]/.test(name)) {
+    throw new Error(`Unsafe ASAR entry name: ${JSON.stringify(name)}`);
+  }
+}
+
+function extractAsar(asarPath, destDir, subDir = '') {
   const fd = fs.openSync(asarPath, 'r');
   try {
     const headerSizeBuf = Buffer.alloc(16);
@@ -15,21 +27,29 @@ function extractAsar(asarPath, destDir) {
 
     const jsonBuf = Buffer.alloc(jsonLen);
     fs.readSync(fd, jsonBuf, 0, jsonLen, 16);
-    const header = JSON.parse(jsonBuf.toString('utf8'));
+    let root = JSON.parse(jsonBuf.toString('utf8'));
+
+    for (const part of subDir.split('/').filter(Boolean)) {
+      if (!root.files || !root.files[part]) {
+        throw new Error(`ASAR path not found: ${subDir}`);
+      }
+      root = root.files[part];
+    }
 
     let fileCount = 0;
 
     function walk(node, relPath) {
       if (node.files) {
-        const dirPath = path.join(destDir, relPath);
-        fs.mkdirSync(dirPath, { recursive: true });
+        fs.mkdirSync(path.join(destDir, relPath), { recursive: true });
         for (const [name, child] of Object.entries(node.files)) {
+          checkEntryName(name);
           walk(child, path.join(relPath, name));
         }
         return;
       }
 
-      if (node.unpacked) {
+      // Unpacked files live in app.asar.unpacked; links are not followed.
+      if (node.unpacked || node.link) {
         return;
       }
 
@@ -46,7 +66,7 @@ function extractAsar(asarPath, destDir) {
       fileCount += 1;
     }
 
-    walk(header, '');
+    walk(root, '');
     return fileCount;
   } finally {
     fs.closeSync(fd);
@@ -54,12 +74,12 @@ function extractAsar(asarPath, destDir) {
 }
 
 if (require.main === module) {
-  const [asarPath, destDir] = process.argv.slice(2);
+  const [asarPath, destDir, subDir] = process.argv.slice(2);
   if (!asarPath || !destDir) {
-    console.error('Usage: node extract-asar.js <app.asar> <destDir>');
+    console.error('Usage: node extract-asar.js <app.asar> <destDir> [subDir]');
     process.exit(1);
   }
-  const count = extractAsar(path.resolve(asarPath), path.resolve(destDir));
+  const count = extractAsar(path.resolve(asarPath), path.resolve(destDir), subDir || '');
   console.log(`Extracted ${count} files to ${path.resolve(destDir)}`);
 }
 

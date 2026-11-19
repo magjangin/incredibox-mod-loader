@@ -3,17 +3,15 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { stableVersionId, parseAppJs, findBandizip } = require('./lib/common');
-
-function toDataURL(buf) {
-  return 'data:application/octet-stream;base64,' + buf.toString('base64');
-}
-
-function normalizeColor(c, fallback = '#000000') {
-  if (!c || typeof c !== 'string') return fallback;
-  const trimmed = c.trim();
-  return trimmed.startsWith('#') ? trimmed : '#' + trimmed;
-}
+const {
+  stableVersionId,
+  parseAppJs,
+  findBandizip,
+  toDataURL,
+  normalizeColor,
+  isGameRunning,
+  installIncredimod,
+} = require('./lib/common');
 
 function getPngWidth(buf) {
   if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
@@ -22,7 +20,7 @@ function getPngWidth(buf) {
   return 0;
 }
 
-function convertAssetFolder(assetDir, userDataModsDir) {
+function convertAssetFolder(assetDir) {
   const appJsPath = path.join(assetDir, 'app.js');
   if (!fs.existsSync(appJsPath)) {
     throw new Error(`app.js not found in ${assetDir}`);
@@ -145,6 +143,9 @@ function convertAssetFolder(assetDir, userDataModsDir) {
     format: formats,
     modders: ['APK Import'],
   };
+  // 100-character APKs (e.g. 10 polos) run natively in the PC window with the
+  // ModLoader engine patch (modloader/engine-patch.js) when nbpolo is kept.
+  if (Number(rawApp.nbpolo) > 0) appJson.nbpolo = Number(rawApp.nbpolo);
 
   const appJsonBuf = Buffer.from(JSON.stringify(appJson), 'utf8');
   pack['app.json'] = { dataURL: toDataURL(appJsonBuf) };
@@ -152,42 +153,20 @@ function convertAssetFolder(assetDir, userDataModsDir) {
   const packJsonStr = JSON.stringify(pack);
   appJson.size = Buffer.byteLength(packJsonStr, 'utf8');
 
-  fs.mkdirSync(userDataModsDir, { recursive: true });
-  const modFilePath = path.join(userDataModsDir, `${versionId}.json`);
-  fs.writeFileSync(modFilePath, packJsonStr, 'utf8');
-
-  // Update localmods.json
-  const localModsPath = path.join(userDataModsDir, 'localmods.json');
-  let localMods = [];
-  if (fs.existsSync(localModsPath)) {
-    try {
-      localMods = JSON.parse(fs.readFileSync(localModsPath, 'utf8'));
-      if (!Array.isArray(localMods)) localMods = [];
-    } catch (_) {
-      localMods = [];
-    }
-  }
-
-  const entry = {
-    version: versionId,
-    name: modName,
-    crew: 'APK Import',
-    modders: ['APK Import'],
-    date: modDate,
-    icon: iconDataURL,
-    format: formats,
-    size: appJson.size,
-    modio: false,
-  };
-
-  const existingIdx = localMods.findIndex((m) => m.version === versionId);
-  if (existingIdx !== -1) {
-    localMods[existingIdx] = entry;
-  } else {
-    localMods.push(entry);
-  }
-
-  fs.writeFileSync(localModsPath, JSON.stringify(localMods), 'utf8');
+  const { dest: modFilePath } = installIncredimod({
+    packStr: packJsonStr,
+    entry: {
+      version: versionId,
+      name: modName,
+      crew: 'APK Import',
+      modders: ['APK Import'],
+      date: modDate,
+      icon: iconDataURL,
+      format: formats,
+      size: appJson.size,
+      modio: false,
+    },
+  });
 
   return {
     versionId,
@@ -200,8 +179,14 @@ function convertAssetFolder(assetDir, userDataModsDir) {
 }
 
 function main() {
+  const args = process.argv.slice(2);
   const defaultApk = path.join(process.env.USERPROFILE, 'Downloads', 'Incredibox.apk');
-  const apkPath = path.resolve(process.argv[2] || defaultApk);
+  const apkPath = path.resolve(args.find((a) => !a.startsWith('--')) || defaultApk);
+
+  if (isGameRunning() && !args.includes('--force')) {
+    console.error('Incredibox is running. Close the game first (it rewrites localmods.json), or pass --force.');
+    process.exit(2);
+  }
 
   if (!fs.existsSync(apkPath)) {
     console.error(`APK not found: ${apkPath}`);
@@ -230,7 +215,6 @@ function main() {
     process.exit(1);
   }
 
-  const userDataModsDir = path.join(process.env.APPDATA, 'Incredibox', 'incredimods');
   const assetDirs = fs
     .readdirSync(wwwDir, { withFileTypes: true })
     .filter((d) => d.isDirectory() && /^asset-v\d+$/i.test(d.name))
@@ -242,7 +226,7 @@ function main() {
   }
 
   for (const dir of assetDirs) {
-    const res = convertAssetFolder(dir, userDataModsDir);
+    const res = convertAssetFolder(dir);
     console.log(
       `Imported "${res.modName}" (version=${res.versionId}, ${res.characters} characters, ${res.files} files, ${res.sizeMB} MB) -> ${res.modFilePath}`
     );
@@ -254,3 +238,5 @@ function main() {
 if (require.main === module) {
   main();
 }
+
+module.exports = { convertAssetFolder };
