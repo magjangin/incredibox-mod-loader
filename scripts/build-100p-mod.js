@@ -368,7 +368,7 @@ function normalizeAndResampleAnimeJson(
   return j;
 }
 
-function stitchImagesWithPython({ pictoPaths, coverPaths, outPicto, outCover, outIcon, iconSize }) {
+function stitchImagesWithPython({ pictoPaths, pictoCounts, coverPaths, outPicto, outCover, outIcon, iconSize }) {
   const pyCode = `
 import sys, json
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -376,6 +376,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 cfg = json.loads(sys.argv[1])
 icon_sz = cfg["iconSize"]
 picto_paths = cfg["pictoPaths"]
+counts = cfg.get("pictoCounts") or [20] * len(picto_paths)
 
 # Stitch N x 20-icon picto strips (each strip is W x H where W = 20*cellW, H = 2*cellH)
 tiles_top = []
@@ -383,7 +384,7 @@ tiles_bot = []
 for p in picto_paths:
     im = Image.open(p).convert("RGBA")
     w, h = im.size
-    cell_w = w / 20.0
+    cell_w = w / float(counts[picto_paths.index(p)])
     cell_h = h / 2.0
     for i in range(20):
         x0 = round(i * cell_w)
@@ -429,7 +430,7 @@ print(f"Stitched {total} icons ({out_im.size[0]}x{out_im.size[1]}) + cover ({W}x
     [
       '-c',
       pyCode,
-      JSON.stringify({ pictoPaths, coverPaths, outPicto, outCover, outIcon, iconSize }),
+      JSON.stringify({ pictoPaths, pictoCounts, coverPaths, outPicto, outCover, outIcon, iconSize }),
     ],
     { stdio: 'inherit' }
   );
@@ -477,11 +478,19 @@ async function main() {
   // 1. Load all sources
   const loaded = [];
   const pictoPaths = [];
+  const pictoCounts = [];
   const coverPaths = [];
 
   for (let sIdx = 0; sIdx < cfg.sources.length; sIdx++) {
     const srcCfg = cfg.sources[sIdx];
     const src = loadSource(srcCfg, workDir);
+    // Optional: use only the first N characters of a source that has more than
+    // 20 (e.g. Ancient Arvo has 23). The picto strip is still cut with the
+    // original icon count so the cells stay aligned.
+    src.pictoCount = src.characters.length;
+    if (srcCfg.firstChars && src.characters.length > srcCfg.firstChars) {
+      src.characters = src.characters.slice(0, srcCfg.firstChars);
+    }
     console.log(
       `  [${sIdx + 1}/${cfg.sources.length}] ${src.label}: ${src.characters.length} chars, ${src.bpm} BPM, ${src.looptime}ms${src.doubleLoop ? ' (2x loop)' : ''}`
     );
@@ -496,6 +505,7 @@ async function main() {
     const pictoFile = path.join(tmpDir, `picto_${sIdx}.png`);
     fs.writeFileSync(pictoFile, src.pictoBuf);
     pictoPaths.push(pictoFile);
+    pictoCounts.push(src.pictoCount);
 
     if (src.coverBuf) {
       const coverFile = path.join(tmpDir, `cover_${sIdx}.jpg`);
@@ -517,6 +527,7 @@ async function main() {
   const outIcon = path.join(outDir, 'icon.jpg');
   stitchImagesWithPython({
     pictoPaths,
+    pictoCounts,
     coverPaths,
     outPicto,
     outCover,
