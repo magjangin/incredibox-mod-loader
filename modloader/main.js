@@ -7,7 +7,7 @@ const { pathToFileURL } = require('url');
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { ensurePcEnginePatched } = require('./engine-patch');
 
-const LOADER_VERSION = '0.3.0';
+const LOADER_VERSION = '0.3.1';
 
 // Preserve original console methods before obfuscated elec-index.js overwrites them.
 const rawConsole = {
@@ -343,9 +343,18 @@ async function backupApkSaves(apkMod, wc) {
   }
 }
 
+// The PC game fades #fade-all to black and shows #lock-all (input lock) right before it
+// navigates to app.html?v=<id>. When that navigation opens an APK window instead, the PC
+// page is left black and locked, so it is reloaded (same URL, back to its home screen)
+// before it is shown again.
 function showPcWindow() {
   if (apkWindows.size > 0) return;
   if (pcWindow && !pcWindow.isDestroyed()) {
+    if (pcWindow.__reloadOnReturn) {
+      pcWindow.__reloadOnReturn = false;
+      logger.info(`Reloading PC window after APK mod (${pcWindow.webContents.getURL()}).`);
+      pcWindow.webContents.reload();
+    }
     pcWindow.show();
     pcWindow.focus();
   }
@@ -434,6 +443,7 @@ function attachWindowHooks(win) {
       if (win.__apkModId === target.id) return; // navigation inside this APK mod's own pages
       event.preventDefault();
       logger.info(`Opening APK mod "${target.name}" for ${url}`);
+      if (!win.__apkModId) win.__reloadOnReturn = true; // PC page is faded out (see showPcWindow)
       openApkWindow(target, win);
       if (win.__apkModId) win.close(); // switching from one APK mod to another
       return;
