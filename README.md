@@ -1,7 +1,7 @@
 # Incredibox ModLoader
 
 **Incredibox PC(Steam) 버전용 모드 로더**입니다.
-게임 코드를 고치지 않고 JS/CSS 모드를 주입하고, 안드로이드용 모드 APK(100캐릭터 / 10폴로)를 PC에서 그대로 실행할 수 있게 해 줍니다.
+JS/CSS 모드를 주입하고, PC판에서도 **100캐릭터 / 10폴로** 모드를 돌릴 수 있게 엔진을 확장하며, 안드로이드용 모드 APK를 PC에서 그대로 실행할 수 있게 해 줍니다.
 
 > ⚠️ 이 저장소에는 게임 파일이 들어 있지 않습니다. Steam에서 구매한 정품 Incredibox가 필요합니다.
 > 비공식 팬 프로젝트이며 So Far So Good(Incredibox 제작사)과 관련이 없습니다.
@@ -11,6 +11,7 @@
 | 기능 | 설명 |
 | --- | --- |
 | 🧩 JS/CSS 모드 | `Mods/<모드>/mod.json`만 만들면 렌더러에 스크립트·스타일 주입, 메인 프로세스 스크립트도 지원 |
+| 💯 100캐릭터 / 10폴로 (PC판) | 아이콘 20개·폴로 7명 제한을 풀어 PC 모드 팩에서 100캐릭터(20 × 5줄)·폴로 10명까지 지원. 여러 모드를 하나로 합치는 매시업 빌더 포함 |
 | 📱 안드로이드 모드 APK 실행 | APK의 웹 에셋을 풀어서 PC에서 실행 — 100캐릭터 아이콘을 20×5 격자로 자동 배치, 화면 배율 조절 |
 | 🎛️ F10 오버레이 | 설치된 모드 목록·상태·에러 표시, APK 모드 실행(Play) / PC판 복귀 |
 | 🛠️ 개발 도구 | `F12` 또는 `Ctrl+Shift+I`로 DevTools, `Mods/modloader.log` 로그 (이전 실행은 `modloader.prev.log`) |
@@ -22,6 +23,7 @@
 - 설치기 exe만 쓰면 다른 프로그램은 필요 없습니다.
   - Windows 10은 기본 `tar.exe`가 7z를 못 풀 수 있으니 [7-Zip](https://7-zip.org) 또는 [Bandizip](https://www.bandisoft.com/bandizip/)을 설치해 두세요 (설치기가 자동으로 찾아 씁니다).
 - 스크립트로 설치하거나 APK 도구를 쓸 때: [Node.js](https://nodejs.org/) 18 이상 + [Bandizip](https://www.bandisoft.com/bandizip/) (`bz.exe`)
+- 매시업 빌더·Scratch 변환기를 쓸 때: 추가로 [ffmpeg](https://ffmpeg.org/) (PATH), 매시업 빌더는 Python 3 + Pillow (`pip install pillow`)
 
 ## 설치 (설치기 exe — 권장)
 
@@ -46,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-game.ps1
 
 설치가 끝나면 **Steam에서 그대로 ▶ 플레이**하면 됩니다.
 셋업이 `Incredibox_steam.exe`를 작은 런처로 바꾸고(원본은 `Incredibox_steam.original.exe`로 보관), 런처가 `Modded\Incredibox.exe`를 실행합니다.
-왼쪽 아래에 `ModLoader v0.2.0 (… JS, … APK) [F10]` 배지가 보이면 모드 로더로 실행된 것입니다.
+왼쪽 아래에 `ModLoader v0.3.0 (… JS, … APK) [F10]` 배지가 보이면 모드 로더로 실행된 것입니다.
 
 | 상황 | 방법 |
 | --- | --- |
@@ -98,7 +100,7 @@ ModLoader.log(mod.id, '안녕하세요!');
 
 ## 안드로이드 모드 APK
 
-PC판은 아이콘 20개·폴로 7명이 고정이라 100캐릭터 모드가 그대로 돌아가지 않습니다. APK의 웹 엔진째로 풀어서 실행합니다.
+APK에 들어 있는 웹 엔진째로 풀어서, 원래 안드로이드판과 똑같이 실행합니다.
 
 ```powershell
 node scripts\unpack-apk-mod.js "C:\path\to\mod.apk"
@@ -112,7 +114,7 @@ node scripts\unpack-apk-mod.js "C:\path\to\mod.apk"
 
 > 참고: 이 스크립트는 녹음 길이 제한(`recmaxloop`)을 999 루프로 늘리고 안드로이드 전용 `cordova.js`를 비활성화합니다.
 
-PC판 기본 모드 슬롯(20캐릭터)으로 가져오려면 `node scripts\import-apk.js "<mod.apk>"` 를 사용하세요 (`%APPDATA%\Incredibox\incredimods\`에 등록).
+PC판 모드 목록으로 가져오려면 `node scripts\import-apk.js "<mod.apk>"` 를 사용하세요 (`%APPDATA%\Incredibox\incredimods\`에 등록, 게임을 끈 상태에서). 같은 이름으로 `unpack-apk-mod.js`로 풀어 둔 모드가 있으면 ▶를 눌렀을 때 APK 창으로 열립니다.
 
 ## Scratch(Sprunki) 작품 → Incredibox 모드
 
@@ -126,9 +128,25 @@ node scripts\sb3-to-incredimod\convert.js "<작품.sb3>" --work "<저장소 밖 
 
 > 리믹스를 허용한 작품만 변환하고, 원작자 크레딧을 남기세요. 원작 파일과 변환 결과물은 저장소에 올리지 마세요. 자세한 내용: [scripts/sb3-to-incredimod/README.md](scripts/sb3-to-incredimod/README.md)
 
-## 개발 예정
+## 100캐릭터 / 10폴로 매시업 (PC판)
 
-- **100아이콘 / 10폴로 모드 제작기:** 안드로이드 모드 APK나 Scratch `.sb3`에서 캐릭터를 뽑아 100캐릭터(20 × 5줄)·폴로 10명짜리 모드를 만드는 기능. PC판 엔진은 아이콘 20개·폴로 7명으로 고정돼 있어 별도 작업이 필요합니다. 계획과 검토할 방식은 [AGENTS.md](AGENTS.md) §5에 있습니다.
+모드 로더 0.3.0부터는 PC판 엔진(`script.min.js`)을 처음 실행할 때 한 번 패치해서(원본은 `script.min.js.orig`로 보관) 아이콘 20개 / 폴로 7명 제한을 풉니다. 모드 팩의 `app.json`에 캐릭터가 20개보다 많으면 아이콘이 20개씩 여러 줄로 배치되고, `nbpolo` 값만큼 폴로가 나옵니다. 일반 모드와 기본 버전은 그대로입니다 (녹음 길이 제한만 약 9999초로 늘어납니다).
+
+20캐릭터 모드 여러 개(설치된 PC 모드, 안드로이드 APK, 압축된 Electron 빌드, 풀어 둔 `asset-v*` 폴더)를 하나로 합치려면 매시업 빌더를 씁니다. BPM이 달라도 음 높이를 유지한 채 템포를 맞추고, 애니메이션 프레임도 다시 맞춥니다.
+
+1. [`scripts/build-100p-mod.example.json`](scripts/build-100p-mod.example.json)을 저장소 밖 작업 폴더에 복사해서 이름, `workDir`, 소스 경로를 고칩니다.
+2. 게임을 끄고 실행합니다.
+
+```powershell
+node scripts\build-100p-mod.js "<작업 폴더>\config.json" --install
+```
+
+- 소스 하나당 캐릭터가 정확히 20개여야 합니다. 5개면 100캐릭터가 됩니다.
+- 40캐릭터가 넘으면 기본으로 LD(저해상도) 스프라이트를 써서 메모리와 팩 크기를 4분의 1로 줄입니다 (`spriteQuality`로 변경).
+- 중간 파일(`<workDir>\tmp`)은 빌드가 끝나면 지웁니다. 남기려면 `--keep-tmp`.
+- 자세한 설정 항목과 주의 사항: [AGENTS.md](AGENTS.md) §3.0.4
+
+> 다른 사람이 만든 모드를 합칠 때는 원작자 크레딧(`crew`, `modders`)을 남기고, 결과물을 배포하기 전에 원작자 허락을 받으세요.
 
 ## 동작 원리
 
@@ -140,6 +158,7 @@ Incredibox_steam.exe (NSIS) ─▶ app-64.7z ─▶ Modded\Incredibox.exe + reso
                                                          │
 modloader/main.js ── Mods/·ApkMods/ 스캔, 로그, DevTools 단축키, Steam 실행 인자 보정
         │           dom-ready 때 renderer.js + 모드 코드 주입
+        │           engine-patch.js: script.min.js 1회 패치 (100캐릭터 / 10폴로)
         └─▶ require('../src/elec-index.js')   (원래 게임 시작)
 ```
 
@@ -149,8 +168,10 @@ modloader/main.js ── Mods/·ApkMods/ 스캔, 로그, DevTools 단축키, Ste
 
 ```
 launcher/         Steam 실행 파일 자리에 들어가는 런처 (C#, 셋업 때 .NET Framework csc로 빌드)
-modloader/        메인 프로세스 부트스트랩(main.js), 렌더러 API·오버레이(renderer.js)
-scripts/          setup-game.ps1, extract-asar.js, unpack-apk-mod.js, import-apk.js, lib/common.js
+installer/        단일 exe 설치기 (C#, scripts/build-installer.ps1로 빌드)
+modloader/        메인 프로세스 부트스트랩(main.js), 엔진 패치(engine-patch.js), 렌더러 API·오버레이(renderer.js)
+scripts/          setup-game.ps1, build-installer.ps1, extract-asar.js, unpack-apk-mod.js, import-apk.js,
+                  build-100p-mod.js(+ example.json), lib/common.js
 scripts/sb3-to-incredimod/   Scratch(.sb3) → Incredibox 모드 변환기
 mods-example/     샘플 모드
 ```
@@ -159,4 +180,6 @@ mods-example/     샘플 모드
 
 - **배지가 안 보임** → 원본으로 실행된 것입니다. Shift를 누르고 있지 않았는지, Steam 업데이트로 런처가 덮어써지지 않았는지 확인하고 `setup-game.ps1`을 다시 실행하세요. 로그는 `Modded\Mods\modloader.log`
 - **Incredibox/Bandizip을 못 찾음** → `-GameDir`, `-Bandizip` 인자 또는 환경변수 `INCREDIBOX_DIR`, `BANDIZIP` 지정
-- **게임 업데이트 후 동작 안 함** → `setup-game.ps1`을 다시 실행 (Modded 폴더를 새로 풀고 로더를 다시 설치)
+- **게임 업데이트 후 동작 안 함** → 설치기(또는 `setup-game.ps1`)를 다시 실행 (Modded 폴더를 새로 풀고 로더를 다시 설치)
+- **100캐릭터 모드 아이콘이 20개만 보임** → `Modded\Mods\modloader.log`에서 `[EnginePatch]` 줄을 확인하세요. `Skipping`이면 게임 업데이트로 패치 위치가 바뀐 것이라 기본 엔진으로 실행됩니다.
+- **설치 스크립트가 "Incredibox is running"으로 멈춤** → 게임을 끄고 다시 실행하세요 (게임이 켜져 있으면 `localmods.json`을 덮어써서 설치가 사라집니다). 꼭 필요하면 `--force`.

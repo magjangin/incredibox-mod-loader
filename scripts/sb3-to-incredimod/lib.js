@@ -42,18 +42,7 @@ function getOptions(argv = process.argv.slice(2)) {
   };
 }
 
-// The game rewrites localmods.json while it runs, so an install made then is lost.
-// Windows only; tasklist prints "INFO: No tasks ..." when nothing matches.
-function gameRunning() {
-  if (process.platform !== 'win32') return false;
-  try {
-    const out = require('child_process').execFileSync('tasklist', ['/FI', 'IMAGENAME eq Incredibox*', '/FO', 'CSV', '/NH'], {
-      encoding: 'utf8',
-    });
-    return /"Incredibox/i.test(out);
-  } catch (_) {
-    return false;
-  }
-}
+// The game rewrites localmods.json while it runs (see ../lib/common.js).
+const { isGameRunning: gameRunning } = require('../lib/common');
 
 module.exports = { getOptions, gameRunning };

@@ -1,0 +1,48 @@
+{
+  "name": "My Mashup 100p",
+  "crew": "Crew A / Crew B / Crew C / Crew D / Crew E",
+  "modders": ["Author A", "Author B", "Author C", "Author D", "Author E"],
+  "bpm": 120,
+  "looptime": 8000,
+  "nbpolo": 10,
+  "spriteQuality": "ld",
+  "iconSize": 68,
+  "backgroundSourceIndex": 4,
+  "workDir": "H:/source/incredibox-work/my-mashup",
+  "sources": [
+    {
+      "id": "pc-pack",
+      "label": "An installed PC incredimod",
+      "type": "incredimod",
+      "path": "C:/Users/<you>/AppData/Roaming/Incredibox/incredimods/9483402.json",
+      "doubleLoop": true
+    },
+    {
+      "id": "android-apk",
+      "label": "An Android mod APK",
+      "type": "apk",
+      "path": "H:/source/incredibox-work/my-mashup/sources/mod.apk",
+      "assetDir": "assets/www/asset-v1"
+    },
+    {
+      "id": "electron-zip",
+      "label": "A zipped Electron build",
+      "type": "asar-zip",
+      "path": "H:/source/incredibox-work/my-mashup/sources/mod-win.zip",
+      "asarEntry": "resources/app.asar",
+      "asarDir": "app/asset-v1"
+    },
+    {
+      "id": "unpacked-1",
+      "label": "An unpacked asset-v* folder",
+      "type": "dir",
+      "dir": "H:/source/incredibox-work/my-mashup/sources/mod-a/assets/www/asset-v1"
+    },
+    {
+      "id": "unpacked-2",
+      "label": "Another unpacked asset-v* folder",
+      "type": "dir",
+      "dir": "H:/source/incredibox-work/my-mashup/sources/mod-b/assets/www/asset-v4"
+    }
+  ]
+}

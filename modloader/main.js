@@ -5,8 +5,9 @@ const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { app, BrowserWindow, ipcMain } = require('electron');
+const { ensurePcEnginePatched } = require('./engine-patch');
 
-const LOADER_VERSION = '0.2.0';
+const LOADER_VERSION = '0.3.0';
 
 // Preserve original console methods before obfuscated elec-index.js overwrites them.
 const rawConsole = {
@@ -497,6 +498,9 @@ if (!process.env.PORTABLE_EXECUTABLE_DIR) {
 if (!app.commandLine.hasSwitch('arg')) {
   app.commandLine.appendSwitch('arg', 'arp');
 }
+
+// Unlock >20 icons / configurable nbpolo in the PC engine before it loads (see engine-patch.js).
+ensurePcEnginePatched(PC_SRC_DIR, logger);
 
 // Hand off execution to the original Incredibox main script
 require('../src/elec-index.js');
